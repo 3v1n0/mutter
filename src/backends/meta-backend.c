@@ -29,9 +29,10 @@
 #include <clutter/clutter-mutter.h>
 #include <meta/meta-backend.h>
 #include <meta/main.h>
+#include <meta/util.h>
 #include "meta-backend-private.h"
 #include "meta-input-settings-private.h"
-
+#include "backends/meta-remote-desktop.h"
 #include "backends/x11/meta-backend-x11.h"
 #include "meta-cursor-tracker-private.h"
 #include "meta-stage.h"
@@ -83,6 +84,7 @@ struct _MetaBackendPrivate
   MetaRenderer *renderer;
   MetaEgl *egl;
   MetaSettings *settings;
+  MetaRemoteDesktop *remote_desktop;
 
   ClutterBackend *clutter_backend;
   ClutterActor *stage;
@@ -114,6 +116,7 @@ meta_backend_finalize (GObject *object)
 
   g_clear_object (&priv->monitor_manager);
   g_clear_object (&priv->input_settings);
+  g_clear_object (&priv->remote_desktop);
 
   if (priv->device_update_idle_id)
     g_source_remove (priv->device_update_idle_id);
@@ -385,6 +388,19 @@ meta_backend_create_input_settings (MetaBackend *backend)
 }
 
 static void
+init_remote_desktop (MetaBackend *backend)
+{
+#ifdef HAVE_WAYLAND
+  if (meta_is_wayland_compositor ())
+    {
+      MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+      priv->remote_desktop = g_object_new (META_TYPE_REMOTE_DESKTOP, NULL);
+    }
+#endif
+}
+
+static void
 meta_backend_real_post_init (MetaBackend *backend)
 {
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
@@ -416,6 +432,8 @@ meta_backend_real_post_init (MetaBackend *backend)
   priv->input_settings = meta_backend_create_input_settings (backend);
 
   center_pointer (backend);
+
+  init_remote_desktop (backend);
 }
 
 static MetaCursorRenderer *
