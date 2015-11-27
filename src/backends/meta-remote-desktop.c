@@ -28,8 +28,10 @@
 
 #include <gst/gst.h>
 #include <meta/errors.h>
+#include <meta/meta-backend.h>
 
 #include "meta-dbus-remote-desktop.h"
+#include "backends/meta-remote-desktop-session.h"
 
 #define META_REMOTE_DESKTOP_DBUS_SERVICE "org.gnome.Mutter.RemoteDesktop"
 #define META_REMOTE_DESKTOP_DBUS_PATH "/org/gnome/Mutter/RemoteDesktop"
@@ -38,9 +40,9 @@ struct _MetaRemoteDesktop
 {
   MetaDBusRemoteDesktopSkeleton parent;
 
-  GstElement *pipeline;
-
   int dbus_name_id;
+
+  MetaRemoteDesktopSession *session;
 };
 
 static void meta_remote_desktop_init_iface (MetaDBusRemoteDesktopIface *iface);
@@ -51,104 +53,26 @@ G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktop,
                          G_IMPLEMENT_INTERFACE (META_DBUS_TYPE_REMOTE_DESKTOP,
                                                 meta_remote_desktop_init_iface));
 
-static void
-meta_remote_desktop_pipeline_closed (MetaRemoteDesktop *rd)
-{
-  gst_element_set_state (rd->pipeline, GST_STATE_NULL);
-  rd->pipeline = NULL;
-}
-
-static gboolean
-meta_remote_desktop_pipeline_bus_watch (GstBus     *bus,
-                                                GstMessage *message,
-                                                gpointer    data)
-{
-  MetaRemoteDesktop *rd = data;
-  GError *error = NULL;
-
-  switch (message->type)
-    {
-    case GST_MESSAGE_EOS:
-      meta_remote_desktop_pipeline_closed (rd);
-
-      g_print ("Bus closed\n");
-
-      return FALSE;
-
-    case GST_MESSAGE_ERROR:
-      gst_message_parse_error (message, &error, NULL);
-      g_warning ("Error in remote desktop video pipeline: %s\n",
-                 error->message);
-      g_error_free (error);
-
-      meta_remote_desktop_pipeline_closed (rd);
-
-      g_print ("Bus closed\n");
-
-      return FALSE;
-
-    default:
-      break;
-    }
-
-  return TRUE;
-}
-
-static gboolean
-meta_remote_desktop_open_pipeline (MetaRemoteDesktop *rd)
-{
-  GstElement *pipeline;
-  GstBus *bus;
-  GError *error = NULL;
-
-  const gchar pipeline_descr[] =
-    "videotestsrc ! pinossink";
-
-  pipeline = gst_parse_launch_full (pipeline_descr,
-                                    NULL,
-                                    GST_PARSE_FLAG_FATAL_ERRORS,
-                                    &error);
-  if (!pipeline)
-    {
-      g_warning ("Couldn't start remote desktop pinos sink: %s",
-                 error->message);
-      return FALSE;
-    }
-
-  gst_element_set_state (pipeline, GST_STATE_PLAYING);
-  bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline));
-  gst_bus_add_watch (bus,
-                     meta_remote_desktop_pipeline_bus_watch,
-                     rd);
-  gst_object_unref (bus);
-
-  rd->pipeline = pipeline;
-
-  return TRUE;
-}
-
-static void
-meta_remote_desktop_close_pipeline (MetaRemoteDesktop *rd)
-{
-  gst_element_send_event (rd->pipeline, gst_event_new_eos ());
-
-}
-
 static gboolean
 meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
                                   GDBusMethodInvocation *invocation)
 {
   MetaRemoteDesktop *rd = META_REMOTE_DESKTOP (skeleton);
+  MetaRemoteDesktopSession *session;
 
   fprintf (stderr, "RD: start\n");
 
-  if (!meta_remote_desktop_open_pipeline (rd))
+  session = meta_remote_desktop_session_new (rd);
+
+  if (!meta_remote_desktop_session_start (session))
     {
       g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
                                              G_DBUS_ERROR_FAILED,
                                              "Failed to initiate remote desktop");
       return TRUE;
     }
+
+  rd->session = session;
 
   meta_dbus_remote_desktop_complete_start (skeleton, invocation);
 
@@ -163,7 +87,18 @@ meta_remote_desktop_handle_stop (MetaDBusRemoteDesktop *skeleton,
 
   fprintf (stderr, "RD: stop\n");
 
-  meta_remote_desktop_close_pipeline (rd);
+  if (!rd->session)
+    {
+      g_object_unref (session);
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_FAILED,
+                                             "No remote desktop session to stop");
+      return TRUE;
+    }
+
+  if (rd->session && meta_remote_desktop_session_is_running (rd->session))
+    meta_remote_desktop_session_stop (rd->session);
+  g_clear_object (&rd->session);
 
   meta_dbus_remote_desktop_complete_stop (skeleton, invocation);
 

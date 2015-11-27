@@ -123,6 +123,8 @@ libmutter_@LIBMUTTER_API_VERSION@_la_SOURCES =	\
 	backends/meta-pointer-constraint.h	\
 	backends/meta-remote-desktop.c		\
 	backends/meta-remote-desktop.h		\
+	backends/meta-remote-desktop-session.c	\
+	backends/meta-remote-desktop-session.h	\
 	backends/meta-settings.c		\
 	backends/meta-settings-private.h	\
 	backends/meta-stage.h			\
