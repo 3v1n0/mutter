@@ -77,6 +77,7 @@ MUTTER_PC_MODULES="
    gtk+-3.0 >= 3.19.8
    gio-unix-2.0 >= 2.35.1
    gstreamer-1.0 >= 1.6
+   gstreamer-base-1.0 >= 1.6
    pango >= 1.2.0
    cairo >= 1.10.0
    gsettings-desktop-schemas >= 3.21.4
