@@ -26,6 +26,7 @@
 #define META_REMOTE_DESKTOP_H
 
 #include <glib-object.h>
+#include <gst/gst.h>
 
 #include "meta-dbus-remote-desktop.h"
 
@@ -37,5 +38,8 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(MetaDBusRemoteDesktopSkeleton, g_object_unref);
 G_DECLARE_FINAL_TYPE (MetaRemoteDesktop, meta_remote_desktop,
                       META, REMOTE_DESKTOP,
                       MetaDBusRemoteDesktopSkeleton);
+
+GstBuffer *meta_remote_desktop_try_create_tmpfile_gst_buffer (MetaRemoteDesktop *rd,
+                                                              size_t             size);
 
 #endif /* META_REMOTE_DESKTOP_H */

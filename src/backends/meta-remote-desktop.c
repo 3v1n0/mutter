@@ -22,11 +22,18 @@
  *     Jonas Ådahl <jadahl@gmail.com>
  */
 
+#define _GNU_SOURCE
+
 #include "config.h"
 
 #include "backends/meta-remote-desktop.h"
 
+#include <fcntl.h>
 #include <gst/gst.h>
+#include <gst/allocators/gstfdmemory.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include <meta/errors.h>
 #include <meta/meta-backend.h>
 
@@ -41,6 +48,7 @@ struct _MetaRemoteDesktop
   MetaDBusRemoteDesktopSkeleton parent;
 
   int dbus_name_id;
+  GstAllocator *fd_allocator;
 
   MetaRemoteDesktopSession *session;
 };
@@ -52,6 +60,62 @@ G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktop,
                          META_DBUS_TYPE_REMOTE_DESKTOP_SKELETON,
                          G_IMPLEMENT_INTERFACE (META_DBUS_TYPE_REMOTE_DESKTOP,
                                                 meta_remote_desktop_init_iface));
+
+static int
+tmpfile_create (size_t size)
+{
+  char filename[] = "/dev/shm/tmpmetaremote.XXXXXX";
+  int fd;
+
+  fd = mkostemp (filename, O_CLOEXEC);
+  if (fd == -1)
+    {
+      meta_warning ("Failed to create temporary file: %s\n", strerror (errno));
+      return -1;
+    }
+  unlink (filename);
+
+  if (ftruncate (fd, size) == -1)
+    {
+      meta_warning ("Failed to truncate temporary file: %s\n",
+                    strerror (errno));
+      close (fd);
+      return -1;
+    }
+
+  return fd;
+}
+
+GstBuffer *
+meta_remote_desktop_try_create_tmpfile_gst_buffer (MetaRemoteDesktop *rd,
+                                                   size_t             size)
+{
+  GstBuffer *buffer;
+  GstMemory *memory;
+  int fd;
+
+  if (!rd->fd_allocator)
+    return NULL;
+
+  fd = tmpfile_create (size);
+  if (fd == -1)
+    return NULL;
+
+  memory = gst_fd_allocator_alloc (rd->fd_allocator,
+                                   fd,
+                                   size,
+                                   GST_FD_MEMORY_FLAG_NONE);
+  if (!memory)
+    {
+      close (fd);
+      return NULL;
+    }
+
+  buffer = gst_buffer_new ();
+  gst_buffer_append_memory (buffer, memory);
+
+  return buffer;
+}
 
 static gboolean
 meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
@@ -160,6 +224,10 @@ static void
 meta_remote_desktop_init (MetaRemoteDesktop *rd)
 {
   gst_init (NULL, NULL);
+
+  rd->fd_allocator = gst_fd_allocator_new ();
+  if (!rd->fd_allocator)
+    meta_warning ("Missing fdmemory gstreamer plugin, fallback to malloc\n");
 }
 
 static void

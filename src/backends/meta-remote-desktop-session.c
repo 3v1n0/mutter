@@ -195,26 +195,37 @@ meta_remote_desktop_session_record_frame (MetaRemoteDesktopSession *session,
                                           GstClockTime              now)
 {
   GstBuffer *buffer;
-  uint8_t *data;
+  GstMapInfo map_info;
   size_t size;
 
   size = session->width * session->height * 4;
 
   /* TODO: Disable using hw planes if we rely on read_pixels. */
 
-  data = g_malloc (size);
+  buffer = meta_remote_desktop_try_create_tmpfile_gst_buffer (session->rd,
+                                                              size);
+  if (!buffer)
+    {
+      uint8_t *data;
+
+      data = g_malloc (size);
+      buffer = gst_buffer_new ();
+      gst_buffer_insert_memory (buffer, -1,
+                                gst_memory_new_wrapped (0, data, size, 0,
+                                                        size, data, g_free));
+    }
+
+  gst_buffer_map (buffer, &map_info, GST_MAP_WRITE);
+
   cogl_framebuffer_read_pixels (cogl_get_draw_framebuffer (),
                                 0,
                                 0,
                                 session->width,
                                 session->height,
                                 CLUTTER_CAIRO_FORMAT_ARGB32,
-                                data);
+                                map_info.data);
 
-  buffer = gst_buffer_new ();
-  gst_buffer_insert_memory (buffer, -1,
-                            gst_memory_new_wrapped (0, data, size, 0,
-                                                    size, data, g_free));
+  gst_buffer_unmap (buffer, &map_info);
 
   meta_remote_desktop_src_add_buffer (META_REMOTE_DESKTOP_SRC (session->src),
                                       buffer);
