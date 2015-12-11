@@ -46,6 +46,7 @@ struct _MetaRemoteDesktopSession
 
   GstElement *pipeline;
   GstElement *src;
+  char *stream_id;
 
   ClutterActor *stage;
   int width;
@@ -152,6 +153,9 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
   g_autoptr(GstElement) pipeline;
   GstBus *bus;
   GError *error = NULL;
+  g_autofree char *stream_id = NULL;
+  GstStructure *stream_properties;
+  static unsigned int global_stream_id = 0;
 
   pipeline = gst_pipeline_new (NULL);
   if (!pipeline)
@@ -163,6 +167,14 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
 
   GstElement *pinossink = gst_element_factory_make ("pinossink", NULL);
   gst_bin_add (GST_BIN (pipeline), pinossink);
+
+  stream_id = g_strdup_printf ("%u", ++global_stream_id);
+  stream_properties =
+    gst_structure_new ("mutter/remote-desktop",
+                       "gnome.remote_desktop.stream_id", G_TYPE_STRING, stream_id,
+                       NULL);
+  g_object_set (pinossink, "stream-properties", stream_properties, NULL);
+  gst_structure_free (stream_properties);
 
   if (!meta_remote_desktop_session_add_source (session, pipeline))
     {
@@ -178,6 +190,7 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
   gst_object_unref (bus);
 
   session->pipeline = g_steal_pointer (&pipeline);
+  session->stream_id = g_steal_pointer (&stream_id);
 
   g_object_ref (session);
 
@@ -289,6 +302,12 @@ gboolean
 meta_remote_desktop_session_is_running (MetaRemoteDesktopSession *session)
 {
   return session->pipeline != NULL;
+}
+
+const char *
+meta_remote_desktop_session_get_stream_id (MetaRemoteDesktopSession *session)
+{
+  return session->stream_id;
 }
 
 MetaRemoteDesktopSession *

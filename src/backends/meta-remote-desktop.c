@@ -123,6 +123,7 @@ meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
 {
   MetaRemoteDesktop *rd = META_REMOTE_DESKTOP (skeleton);
   MetaRemoteDesktopSession *session;
+  const char *stream_id;
 
   fprintf (stderr, "RD: start\n");
 
@@ -138,7 +139,10 @@ meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
 
   rd->session = session;
 
-  meta_dbus_remote_desktop_complete_start (skeleton, invocation);
+  stream_id = meta_remote_desktop_session_get_stream_id (session);
+  meta_dbus_remote_desktop_complete_start (skeleton,
+                                           invocation,
+                                           stream_id);
 
   return TRUE;
 }

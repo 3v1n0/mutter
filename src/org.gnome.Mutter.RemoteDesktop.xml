@@ -11,8 +11,10 @@
 
     <!--
         Start:
+        @stream_id: Unique pinos stream id
     -->
     <method name="Start">
+      <arg type="s" direction="out" name="stream_id"/>
     </method>
 
     <!--

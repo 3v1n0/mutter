@@ -42,6 +42,8 @@ void meta_remote_desktop_session_stop (MetaRemoteDesktopSession *session);
 
 gboolean meta_remote_desktop_session_is_running (MetaRemoteDesktopSession *session);
 
+const char *meta_remote_desktop_session_get_stream_id (MetaRemoteDesktopSession *session);
+
 MetaRemoteDesktopSession *meta_remote_desktop_session_new (MetaRemoteDesktop *rd);
 
 #endif /* META_REMOTE_DESKTOP_SESSION_H */
