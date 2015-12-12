@@ -31,10 +31,13 @@
 
 typedef struct _MetaRemoteDesktopSession MetaRemoteDesktopSession;
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(MetaDBusRemoteDesktopSessionSkeleton,
+                              g_object_unref);
+
 #define META_TYPE_REMOTE_DESKTOP_SESSION (meta_remote_desktop_session_get_type ())
 G_DECLARE_FINAL_TYPE (MetaRemoteDesktopSession, meta_remote_desktop_session,
                       META, REMOTE_DESKTOP_SESSION,
-                      GObject);
+                      MetaDBusRemoteDesktopSessionSkeleton);
 
 gboolean meta_remote_desktop_session_start (MetaRemoteDesktopSession *session);
 
@@ -42,7 +45,7 @@ void meta_remote_desktop_session_stop (MetaRemoteDesktopSession *session);
 
 gboolean meta_remote_desktop_session_is_running (MetaRemoteDesktopSession *session);
 
-const char *meta_remote_desktop_session_get_stream_id (MetaRemoteDesktopSession *session);
+const char *meta_remote_desktop_session_get_object_path (MetaRemoteDesktopSession *session);
 
 MetaRemoteDesktopSession *meta_remote_desktop_session_new (MetaRemoteDesktop *rd);
 

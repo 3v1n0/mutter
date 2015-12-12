@@ -49,8 +49,6 @@ struct _MetaRemoteDesktop
 
   int dbus_name_id;
   GstAllocator *fd_allocator;
-
-  MetaRemoteDesktopSession *session;
 };
 
 static void meta_remote_desktop_init_iface (MetaDBusRemoteDesktopIface *iface);
@@ -123,7 +121,7 @@ meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
 {
   MetaRemoteDesktop *rd = META_REMOTE_DESKTOP (skeleton);
   MetaRemoteDesktopSession *session;
-  const char *stream_id;
+  const char *session_path;
 
   fprintf (stderr, "RD: start\n");
 
@@ -137,38 +135,10 @@ meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
       return TRUE;
     }
 
-  rd->session = session;
-
-  stream_id = meta_remote_desktop_session_get_stream_id (session);
+  session_path = meta_remote_desktop_session_get_object_path (session);
   meta_dbus_remote_desktop_complete_start (skeleton,
                                            invocation,
-                                           stream_id);
-
-  return TRUE;
-}
-
-static gboolean
-meta_remote_desktop_handle_stop (MetaDBusRemoteDesktop *skeleton,
-                                 GDBusMethodInvocation *invocation)
-{
-  MetaRemoteDesktop *rd = META_REMOTE_DESKTOP (skeleton);
-
-  fprintf (stderr, "RD: stop\n");
-
-  if (!rd->session)
-    {
-      g_object_unref (session);
-      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
-                                             G_DBUS_ERROR_FAILED,
-                                             "No remote desktop session to stop");
-      return TRUE;
-    }
-
-  if (rd->session && meta_remote_desktop_session_is_running (rd->session))
-    meta_remote_desktop_session_stop (rd->session);
-  g_clear_object (&rd->session);
-
-  meta_dbus_remote_desktop_complete_stop (skeleton, invocation);
+                                           session_path);
 
   return TRUE;
 }
@@ -177,7 +147,6 @@ static void
 meta_remote_desktop_init_iface (MetaDBusRemoteDesktopIface *iface)
 {
   iface->handle_start = meta_remote_desktop_handle_start;
-  iface->handle_stop = meta_remote_desktop_handle_stop;
 }
 
 static void

@@ -31,7 +31,10 @@
 #include <meta/meta-backend.h>
 #include <meta/errors.h>
 
+#include "meta-dbus-remote-desktop.h"
 #include "backends/meta-remote-desktop-src.h"
+
+#define META_REMOTE_DESKTOP_SESSION_DBUS_PATH "/org/gnome/Mutter/RemoteDesktop/Session"
 
 #define DEFAULT_FRAMERATE 30
 
@@ -40,13 +43,15 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstElement, gst_object_unref);
 
 struct _MetaRemoteDesktopSession
 {
-  GObject parent;
+  MetaDBusRemoteDesktopSessionSkeleton parent;
 
   MetaRemoteDesktop *rd;
 
   GstElement *pipeline;
   GstElement *src;
   char *stream_id;
+
+  char *object_path;
 
   ClutterActor *stage;
   int width;
@@ -55,9 +60,14 @@ struct _MetaRemoteDesktopSession
   GstClockTime last_frame_time;
 };
 
-G_DEFINE_TYPE (MetaRemoteDesktopSession,
-               meta_remote_desktop_session,
-               G_TYPE_OBJECT);
+static void
+meta_remote_desktop_session_init_iface (MetaDBusRemoteDesktopSessionIface *iface);
+
+G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktopSession,
+                         meta_remote_desktop_session,
+                         META_DBUS_TYPE_REMOTE_DESKTOP_SESSION_SKELETON,
+                         G_IMPLEMENT_INTERFACE (META_DBUS_TYPE_REMOTE_DESKTOP_SESSION,
+                                                meta_remote_desktop_session_init_iface));
 
 static void
 meta_remote_desktop_session_pipeline_closed (MetaRemoteDesktopSession *session)
@@ -156,6 +166,7 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
   g_autofree char *stream_id = NULL;
   GstStructure *stream_properties;
   static unsigned int global_stream_id = 0;
+  MetaDBusRemoteDesktopSession *dbus_session;
 
   pipeline = gst_pipeline_new (NULL);
   if (!pipeline)
@@ -181,6 +192,10 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
       meta_warning ("MetaRemoteDesktop: Couldn't add video source\n");
       return FALSE;
     }
+
+  dbus_session = META_DBUS_REMOTE_DESKTOP_SESSION (session);
+  meta_dbus_remote_desktop_session_set_pinos_stream_id (dbus_session,
+                                                        stream_id);
 
   gst_element_set_state (pipeline, GST_STATE_PLAYING);
   bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline));
@@ -305,20 +320,61 @@ meta_remote_desktop_session_is_running (MetaRemoteDesktopSession *session)
 }
 
 const char *
-meta_remote_desktop_session_get_stream_id (MetaRemoteDesktopSession *session)
+meta_remote_desktop_session_get_object_path (MetaRemoteDesktopSession *session)
 {
-  return session->stream_id;
+  return session->object_path;
 }
 
 MetaRemoteDesktopSession *
 meta_remote_desktop_session_new (MetaRemoteDesktop *rd)
 {
   MetaRemoteDesktopSession *session;
+  GDBusConnection *connection;
+  GError *error = NULL;
+  static unsigned int global_session_number = 0;
 
   session = g_object_new (META_TYPE_REMOTE_DESKTOP_SESSION, NULL);
   session->rd = rd;
+  session->object_path =
+    g_strdup_printf (META_REMOTE_DESKTOP_SESSION_DBUS_PATH "/u%u",
+                     ++global_session_number);
+
+  connection =
+    g_dbus_interface_skeleton_get_connection (G_DBUS_INTERFACE_SKELETON (rd));
+  if (!g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (session),
+                                         connection,
+                                         session->object_path,
+                                         &error))
+    {
+      meta_warning ("Failed to export session object: %s\n", error->message);
+      return NULL;
+    }
 
   return session;
+}
+
+static gboolean
+meta_remote_desktop_session_handle_stop (MetaDBusRemoteDesktopSession *skeleton,
+                                         GDBusMethodInvocation        *invocation)
+{
+  MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (skeleton);
+
+  fprintf (stderr, "RD: stop\n");
+
+  if (meta_remote_desktop_session_is_running (session))
+    meta_remote_desktop_session_stop (session);
+
+  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
+
+  meta_dbus_remote_desktop_session_complete_stop (skeleton, invocation);
+
+  return TRUE;
+}
+
+static void
+meta_remote_desktop_session_init_iface (MetaDBusRemoteDesktopSessionIface *iface)
+{
+  iface->handle_stop = meta_remote_desktop_session_handle_stop;
 }
 
 static void
