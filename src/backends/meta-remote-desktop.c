@@ -47,9 +47,19 @@ struct _MetaRemoteDesktop
 {
   MetaDBusRemoteDesktopSkeleton parent;
 
+  GHashTable *clients;
+
   int dbus_name_id;
   GstAllocator *fd_allocator;
 };
+
+typedef struct _MetaRemoteDesktopClient
+{
+  MetaRemoteDesktop *rd;
+  char *dbus_name;
+  guint name_watcher_id;
+  GList *sessions;
+} MetaRemoteDesktopClient;
 
 static void meta_remote_desktop_init_iface (MetaDBusRemoteDesktopIface *iface);
 
@@ -115,6 +125,119 @@ meta_remote_desktop_try_create_tmpfile_gst_buffer (MetaRemoteDesktop *rd,
   return buffer;
 }
 
+static void
+meta_remote_desktop_client_destroy (MetaRemoteDesktopClient *client)
+{
+  GList *l;
+
+  for (l = client->sessions; l; l = l->next)
+    {
+      MetaRemoteDesktopSession *session = l->data;
+
+      meta_remote_desktop_session_stop (session);
+    }
+  g_list_free (client->sessions);
+
+  if (client->name_watcher_id)
+    g_bus_unwatch_name (client->name_watcher_id);
+
+  g_free (client->dbus_name);
+  g_free (client);
+}
+
+static void
+meta_remote_desktop_destroy_client (MetaRemoteDesktop       *rd,
+                                    MetaRemoteDesktopClient *client)
+{
+  g_hash_table_remove (rd->clients, client->dbus_name);
+}
+
+static void
+name_vanished_callback (GDBusConnection *connection,
+                        const char      *name,
+                        gpointer         user_data)
+{
+  MetaRemoteDesktopClient *client = user_data;
+
+  meta_warning ("MetaRemoteDesktop: remote desktop session client vanished\n");
+
+  client->name_watcher_id = 0;
+
+  meta_remote_desktop_destroy_client (client->rd, client);
+}
+
+static MetaRemoteDesktopClient *
+meta_remote_desktop_client_new (MetaRemoteDesktop *rd,
+                                const char        *dbus_name)
+{
+  MetaRemoteDesktopClient *client;
+  GDBusConnection *connection;
+
+  client = g_new0 (MetaRemoteDesktopClient, 1);
+  client->rd = rd;
+  client->dbus_name = g_strdup (dbus_name);
+
+  connection =
+    g_dbus_interface_skeleton_get_connection (G_DBUS_INTERFACE_SKELETON (rd));
+  client->name_watcher_id =
+    g_bus_watch_name_on_connection (connection,
+                                    dbus_name,
+                                    G_BUS_NAME_WATCHER_FLAGS_NONE,
+                                    NULL,
+                                    name_vanished_callback,
+                                    client,
+                                    NULL);
+
+  return client;
+}
+
+static void
+client_session_destroyed (gpointer data, GObject *where_the_object_was)
+{
+  MetaRemoteDesktopClient *client = data;
+
+  client->sessions = g_list_remove (client->sessions, where_the_object_was);
+
+  if (!client->sessions)
+    meta_remote_desktop_destroy_client (client->rd, client);
+}
+
+static void
+meta_remote_desktop_client_add_session (MetaRemoteDesktopClient  *client,
+                                        MetaRemoteDesktopSession *session)
+{
+  client->sessions = g_list_append (client->sessions, session);
+  g_object_weak_ref (G_OBJECT (session),
+                     client_session_destroyed,
+                     client);
+}
+
+static MetaRemoteDesktopClient *
+meta_remote_desktop_get_client (MetaRemoteDesktop *rd,
+                                const char        *dbus_name)
+{
+  return g_hash_table_lookup (rd->clients, dbus_name);
+}
+
+static void
+meta_remote_desktop_watch_session_client (MetaRemoteDesktop        *rd,
+                                          GDBusMethodInvocation    *invocation,
+                                          MetaRemoteDesktopSession *session)
+{
+  MetaRemoteDesktopClient *client;
+  const char *dbus_name;
+
+  dbus_name = g_dbus_method_invocation_get_sender (invocation);
+  client = meta_remote_desktop_get_client (rd, dbus_name);
+  if (!client)
+    {
+      client = meta_remote_desktop_client_new (rd, dbus_name);
+      g_hash_table_insert (rd->clients, g_strdup (dbus_name), client);
+    }
+
+  meta_remote_desktop_client_add_session (client, session);
+}
+
 static gboolean
 meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
                                   GDBusMethodInvocation *invocation)
@@ -134,6 +257,8 @@ meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
                                              "Failed to initiate remote desktop");
       return TRUE;
     }
+
+  meta_remote_desktop_watch_session_client (rd, invocation, session);
 
   session_path = meta_remote_desktop_session_get_object_path (session);
   meta_dbus_remote_desktop_complete_start (skeleton,
@@ -201,6 +326,12 @@ meta_remote_desktop_init (MetaRemoteDesktop *rd)
   rd->fd_allocator = gst_fd_allocator_new ();
   if (!rd->fd_allocator)
     meta_warning ("Missing fdmemory gstreamer plugin, fallback to malloc\n");
+
+  rd->clients =
+    g_hash_table_new_full (g_str_hash,
+                           g_str_equal,
+                           g_free,
+                           (GDestroyNotify) meta_remote_desktop_client_destroy);
 }
 
 static void
