@@ -400,6 +400,10 @@ meta_remote_desktop_session_finalize (GObject *object)
   if (meta_remote_desktop_session_is_running (session))
     meta_remote_desktop_session_stop (session);
 
+  g_clear_pointer (&session->pipeline, gst_object_unref);
+  g_free (session->stream_id);
+  g_free (session->object_path);
+
   G_OBJECT_CLASS (meta_remote_desktop_session_parent_class)->finalize (object);
 }
 
