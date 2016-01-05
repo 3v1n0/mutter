@@ -47,8 +47,11 @@ enum
 
 guint signals[LAST_SIGNAL];
 
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstPad, gst_object_unref);
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstElement, gst_object_unref);
+typedef struct _MetaRemoteDesktopPipeline
+{
+  MetaRemoteDesktopSession *session;
+  GstElement *pipeline;
+} MetaRemoteDesktopPipeline;
 
 struct _MetaRemoteDesktopSession
 {
@@ -56,7 +59,7 @@ struct _MetaRemoteDesktopSession
 
   MetaRemoteDesktop *rd;
 
-  GstElement *pipeline;
+  MetaRemoteDesktopPipeline *pipeline;
   GstElement *src;
   char *stream_id;
 
@@ -72,6 +75,13 @@ struct _MetaRemoteDesktopSession
 static void
 meta_remote_desktop_session_init_iface (MetaDBusRemoteDesktopSessionIface *iface);
 
+static void
+meta_remote_desktop_pipeline_free (MetaRemoteDesktopPipeline *pipeline);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstPad, gst_object_unref);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaRemoteDesktopPipeline,
+                               meta_remote_desktop_pipeline_free);
+
 G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktopSession,
                          meta_remote_desktop_session,
                          META_DBUS_TYPE_REMOTE_DESKTOP_SESSION_SKELETON,
@@ -79,12 +89,21 @@ G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktopSession,
                                                 meta_remote_desktop_session_init_iface));
 
 static void
-meta_remote_desktop_session_pipeline_closed (MetaRemoteDesktopSession *session)
+meta_remote_desktop_pipeline_free (MetaRemoteDesktopPipeline *pipeline)
 {
-  gst_element_set_state (session->pipeline, GST_STATE_NULL);
-  session->pipeline = NULL;
+  gst_object_unref (pipeline->pipeline);
+  g_free (pipeline);
+}
 
-  g_object_unref (session);
+static void
+meta_remote_desktop_session_pipeline_closed (MetaRemoteDesktopPipeline *pipeline)
+{
+  gst_element_set_state (pipeline->pipeline, GST_STATE_NULL);
+
+  if (pipeline->session)
+    pipeline->session->pipeline = NULL;
+
+  meta_remote_desktop_pipeline_free (pipeline);
 }
 
 static gboolean
@@ -92,15 +111,16 @@ meta_remote_desktop_session_pipeline_bus_watch (GstBus     *bus,
                                                 GstMessage *message,
                                                 gpointer    data)
 {
-  MetaRemoteDesktopSession *session = data;
+  MetaRemoteDesktopPipeline *pipeline = data;
+  MetaRemoteDesktopSession *session;
   GError *error = NULL;
 
   switch (message->type)
     {
     case GST_MESSAGE_EOS:
-      meta_remote_desktop_session_pipeline_closed (session);
+      g_assert (!pipeline->session);
 
-      g_print ("Bus closed\n");
+      meta_remote_desktop_session_pipeline_closed (pipeline);
 
       return FALSE;
 
@@ -110,9 +130,11 @@ meta_remote_desktop_session_pipeline_bus_watch (GstBus     *bus,
                  error->message);
       g_error_free (error);
 
-      meta_remote_desktop_session_pipeline_closed (session);
+      session = pipeline->session;
+      meta_remote_desktop_session_pipeline_closed (pipeline);
 
-      g_print ("Bus closed\n");
+      if (session)
+        meta_remote_desktop_session_stop (session);
 
       return FALSE;
 
@@ -124,14 +146,15 @@ meta_remote_desktop_session_pipeline_bus_watch (GstBus     *bus,
 }
 
 static gboolean
-meta_remote_desktop_session_add_source (MetaRemoteDesktopSession *session,
-                                        GstElement               *pipeline)
+meta_remote_desktop_session_add_source (MetaRemoteDesktopSession  *session,
+                                        MetaRemoteDesktopPipeline *pipeline)
 {
   g_autoptr(GstPad) sink_pad = NULL;
   g_autoptr(GstPad) src_pad = NULL;
   MetaRemoteDesktopSrc *src;
 
-  sink_pad = gst_bin_find_unlinked_pad (GST_BIN (pipeline), GST_PAD_SINK);
+  sink_pad = gst_bin_find_unlinked_pad (GST_BIN (pipeline->pipeline),
+                                        GST_PAD_SINK);
   if (sink_pad == NULL)
     {
       meta_warning ("MetaRemoteDesktop: pipeline has no unlinked sink pad\n");
@@ -146,7 +169,7 @@ meta_remote_desktop_session_add_source (MetaRemoteDesktopSession *session,
       meta_warning ("MetaRemoteDesktop: Can't create source element\n");
       return FALSE;
     }
-  gst_bin_add (GST_BIN (pipeline), GST_ELEMENT (src));
+  gst_bin_add (GST_BIN (pipeline->pipeline), GST_ELEMENT (src));
 
   src_pad = gst_element_get_static_pad (GST_ELEMENT (src), "src");
   if (!src_pad)
@@ -169,7 +192,7 @@ meta_remote_desktop_session_add_source (MetaRemoteDesktopSession *session,
 static gboolean
 meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
 {
-  g_autoptr(GstElement) pipeline;
+  g_autoptr(MetaRemoteDesktopPipeline) pipeline = NULL;
   GstBus *bus;
   GError *error = NULL;
   g_autofree char *stream_id = NULL;
@@ -177,8 +200,11 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
   static unsigned int global_stream_id = 0;
   MetaDBusRemoteDesktopSession *dbus_session;
 
-  pipeline = gst_pipeline_new (NULL);
-  if (!pipeline)
+  pipeline = g_new0 (MetaRemoteDesktopPipeline, 1);
+
+  pipeline->session = session;
+  pipeline->pipeline = gst_pipeline_new (NULL);
+  if (!pipeline->pipeline)
     {
       meta_warning ("MetaRemoteDesktop: Couldn't start pinos sink: %s\n",
                     error->message);
@@ -186,7 +212,7 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
     }
 
   GstElement *pinossink = gst_element_factory_make ("pinossink", NULL);
-  gst_bin_add (GST_BIN (pipeline), pinossink);
+  gst_bin_add (GST_BIN (pipeline->pipeline), pinossink);
 
   stream_id = g_strdup_printf ("%u", ++global_stream_id);
   stream_properties =
@@ -206,17 +232,15 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
   meta_dbus_remote_desktop_session_set_pinos_stream_id (dbus_session,
                                                         stream_id);
 
-  gst_element_set_state (pipeline, GST_STATE_PLAYING);
-  bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline));
+  gst_element_set_state (pipeline->pipeline, GST_STATE_PLAYING);
+  bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline->pipeline));
   gst_bus_add_watch (bus,
                      meta_remote_desktop_session_pipeline_bus_watch,
-                     session);
+                     pipeline);
   gst_object_unref (bus);
 
   session->pipeline = g_steal_pointer (&pipeline);
   session->stream_id = g_steal_pointer (&stream_id);
-
-  g_object_ref (session);
 
   return TRUE;
 }
@@ -224,7 +248,15 @@ meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
 static void
 meta_remote_desktop_session_close_pipeline (MetaRemoteDesktopSession *session)
 {
-  gst_element_send_event (session->pipeline, gst_event_new_eos ());
+  MetaRemoteDesktopPipeline *pipeline = session->pipeline;
+
+  if (pipeline)
+    {
+      pipeline->session = NULL;
+      session->pipeline = NULL;
+
+      gst_element_send_event (pipeline->pipeline, gst_event_new_eos ());
+    }
 }
 
 static void
@@ -410,7 +442,6 @@ meta_remote_desktop_session_finalize (GObject *object)
 
   g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
 
-  g_clear_pointer (&session->pipeline, gst_object_unref);
   g_free (session->stream_id);
   g_free (session->object_path);
 
