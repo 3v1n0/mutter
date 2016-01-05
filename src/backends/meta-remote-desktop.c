@@ -130,11 +130,18 @@ meta_remote_desktop_client_destroy (MetaRemoteDesktopClient *client)
 {
   GList *l;
 
-  for (l = client->sessions; l; l = l->next)
+  l = client->sessions;
+  while (l)
     {
+      GList *next = l->next;
       MetaRemoteDesktopSession *session = l->data;
 
+      /* This will invoke on_session_stopped which removes the session from the
+       * list.
+       */
       meta_remote_desktop_session_stop (session);
+
+      l = next;
     }
   g_list_free (client->sessions);
 
@@ -192,11 +199,12 @@ meta_remote_desktop_client_new (MetaRemoteDesktop *rd,
 }
 
 static void
-client_session_destroyed (gpointer data, GObject *where_the_object_was)
+on_session_stopped (MetaRemoteDesktopSession *session,
+                    MetaRemoteDesktopClient  *client)
 {
-  MetaRemoteDesktopClient *client = data;
+  client->sessions = g_list_remove (client->sessions, session);
 
-  client->sessions = g_list_remove (client->sessions, where_the_object_was);
+  g_object_unref (session);
 
   if (!client->sessions)
     meta_remote_desktop_destroy_client (client->rd, client);
@@ -207,9 +215,9 @@ meta_remote_desktop_client_add_session (MetaRemoteDesktopClient  *client,
                                         MetaRemoteDesktopSession *session)
 {
   client->sessions = g_list_append (client->sessions, session);
-  g_object_weak_ref (G_OBJECT (session),
-                     client_session_destroyed,
-                     client);
+  g_signal_connect (session, "stopped",
+                    G_CALLBACK (on_session_stopped),
+                    client);
 }
 
 static MetaRemoteDesktopClient *

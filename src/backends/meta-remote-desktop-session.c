@@ -38,6 +38,15 @@
 
 #define DEFAULT_FRAMERATE 30
 
+enum
+{
+  STOPPED,
+
+  LAST_SIGNAL
+};
+
+guint signals[LAST_SIGNAL];
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstPad, gst_object_unref);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstElement, gst_object_unref);
 
@@ -311,6 +320,8 @@ meta_remote_desktop_session_stop (MetaRemoteDesktopSession *session)
   g_signal_handlers_disconnect_by_func (session->stage,
                                         (gpointer) meta_remote_desktop_session_on_stage_paint,
                                         session);
+
+  g_signal_emit (session, signals[STOPPED], 0);
 }
 
 gboolean
@@ -395,8 +406,7 @@ meta_remote_desktop_session_finalize (GObject *object)
 {
   MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (object);
 
-  if (meta_remote_desktop_session_is_running (session))
-    meta_remote_desktop_session_stop (session);
+  g_assert (!meta_remote_desktop_session_is_running (session));
 
   g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
 
@@ -414,4 +424,11 @@ meta_remote_desktop_session_class_init (MetaRemoteDesktopSessionClass *klass)
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
   object_class->finalize = meta_remote_desktop_session_finalize;
+
+  signals[STOPPED] = g_signal_new ("stopped",
+                                   G_TYPE_FROM_CLASS (klass),
+                                   G_SIGNAL_RUN_LAST,
+                                   0,
+                                   NULL, NULL, NULL,
+                                   G_TYPE_NONE, 0);
 }
