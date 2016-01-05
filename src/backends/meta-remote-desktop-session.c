@@ -364,8 +364,6 @@ meta_remote_desktop_session_handle_stop (MetaDBusRemoteDesktopSession *skeleton,
   if (meta_remote_desktop_session_is_running (session))
     meta_remote_desktop_session_stop (session);
 
-  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
-
   meta_dbus_remote_desktop_session_complete_stop (skeleton, invocation);
 
   return TRUE;
@@ -399,6 +397,8 @@ meta_remote_desktop_session_finalize (GObject *object)
 
   if (meta_remote_desktop_session_is_running (session))
     meta_remote_desktop_session_stop (session);
+
+  g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (session));
 
   g_clear_pointer (&session->pipeline, gst_object_unref);
   g_free (session->stream_id);
