@@ -78,7 +78,6 @@ meta_remote_desktop_session_init_iface (MetaDBusRemoteDesktopSessionIface *iface
 static void
 meta_remote_desktop_pipeline_free (MetaRemoteDesktopPipeline *pipeline);
 
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstPad, gst_object_unref);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaRemoteDesktopPipeline,
                                meta_remote_desktop_pipeline_free);
 

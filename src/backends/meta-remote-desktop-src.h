@@ -31,8 +31,6 @@
 
 typedef struct _MetaRemoteDesktopSrc MetaRemoteDesktopSrc;
 
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstPushSrc, gst_object_unref);
-
 #define META_TYPE_REMOTE_DESKTOP_SRC (meta_remote_desktop_src_get_type ())
 G_DECLARE_FINAL_TYPE (MetaRemoteDesktopSrc,
                       meta_remote_desktop_src,
