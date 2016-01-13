@@ -28,11 +28,15 @@
 
 #include <cogl/cogl.h>
 #include <gst/gst.h>
-#include <meta/meta-backend.h>
-#include <meta/errors.h>
+#include <linux/input.h>
+#include <xkbcommon/xkbcommon.h>
 
-#include "meta-dbus-remote-desktop.h"
+#include "backends/native/meta-backend-native.h"
+#include "backends/x11/meta-backend-x11.h"
 #include "backends/meta-remote-desktop-src.h"
+#include "meta/meta-backend.h"
+#include "meta/errors.h"
+#include "meta-dbus-remote-desktop.h"
 
 #define META_REMOTE_DESKTOP_SESSION_DBUS_PATH "/org/gnome/Mutter/RemoteDesktop/Session"
 
@@ -70,6 +74,9 @@ struct _MetaRemoteDesktopSession
   int height;
 
   GstClockTime last_frame_time;
+
+  ClutterVirtualInputDevice *virtual_pointer;
+  ClutterVirtualInputDevice *virtual_keyboard;
 };
 
 static void
@@ -396,8 +403,8 @@ meta_remote_desktop_session_new (MetaRemoteDesktop *rd)
 }
 
 static gboolean
-meta_remote_desktop_session_handle_stop (MetaDBusRemoteDesktopSession *skeleton,
-                                         GDBusMethodInvocation        *invocation)
+handle_stop (MetaDBusRemoteDesktopSession *skeleton,
+             GDBusMethodInvocation        *invocation)
 {
   MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (skeleton);
 
@@ -411,10 +418,168 @@ meta_remote_desktop_session_handle_stop (MetaDBusRemoteDesktopSession *skeleton,
   return TRUE;
 }
 
+static gboolean
+handle_notify_keyboard_keysym (MetaDBusRemoteDesktopSession *skeleton,
+                               GDBusMethodInvocation        *invocation,
+                               guint                         keysym,
+                               gboolean                      pressed)
+{
+  MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (skeleton);
+
+  ClutterKeyState state;
+
+  if (pressed)
+    state = CLUTTER_KEY_STATE_PRESSED;
+  else
+    state = CLUTTER_KEY_STATE_RELEASED;
+
+  clutter_virtual_input_device_notify_keyval (session->virtual_keyboard,
+                                              CLUTTER_CURRENT_TIME,
+                                              keysym,
+                                              state);
+
+  meta_dbus_remote_desktop_session_complete_notify_keyboard_keysym (skeleton,
+                                                                    invocation);
+  return TRUE;
+}
+
+/* Translation taken from the clutter evdev backend. */
+static gint
+translate_to_clutter_button (gint button)
+{
+  switch (button)
+    {
+    case BTN_LEFT:
+      return CLUTTER_BUTTON_PRIMARY;
+    case BTN_RIGHT:
+      return CLUTTER_BUTTON_SECONDARY;
+    case BTN_MIDDLE:
+      return CLUTTER_BUTTON_MIDDLE;
+    default:
+      /* For compatibility reasons, all additional buttons go after the old 4-7
+       * scroll ones.
+       */
+      return button - (BTN_LEFT - 1) + 4;
+    }
+}
+
+static gboolean
+handle_notify_pointer_button (MetaDBusRemoteDesktopSession *skeleton,
+                              GDBusMethodInvocation        *invocation,
+                              gint                          button_code,
+                              gboolean                      pressed)
+{
+  MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (skeleton);
+  uint32_t button;
+  ClutterButtonState state;
+
+  button = translate_to_clutter_button (button_code);
+
+  if (pressed)
+    state = CLUTTER_BUTTON_STATE_PRESSED;
+  else
+    state = CLUTTER_BUTTON_STATE_RELEASED;
+
+  clutter_virtual_input_device_notify_button (session->virtual_pointer,
+                                              CLUTTER_CURRENT_TIME,
+                                              button,
+                                              state);
+
+  meta_dbus_remote_desktop_session_complete_notify_pointer_button (skeleton,
+                                                                   invocation);
+
+  return TRUE;
+}
+
+static ClutterScrollDirection
+discrete_steps_to_scroll_direction (guint axis,
+                                    gint  steps)
+{
+  if (axis == 0 && steps < 0)
+    return CLUTTER_SCROLL_UP;
+  if (axis == 0 && steps > 0)
+    return CLUTTER_SCROLL_DOWN;
+  if (axis == 1 && steps < 0)
+    return CLUTTER_SCROLL_LEFT;
+  if (axis == 1 && steps > 0)
+    return CLUTTER_SCROLL_RIGHT;
+
+  g_assert_not_reached ();
+}
+
+static gboolean
+handle_notify_pointer_axis_discrete (MetaDBusRemoteDesktopSession *skeleton,
+                                     GDBusMethodInvocation        *invocation,
+                                     guint                         axis,
+                                     gint                          steps)
+{
+  MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (skeleton);
+  ClutterScrollDirection direction;
+
+  if (axis <= 1)
+    {
+      meta_warning ("MetaRemoteDesktop: Invalid pointer axis\n");
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_FAILED,
+                                             "Invalid axis value");
+      return TRUE;
+    }
+
+  if (steps == 0)
+    {
+      meta_warning ("MetaRemoteDesktop: Invalid axis steps value\n");
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_FAILED,
+                                             "Invalid axis steps value");
+      return TRUE;
+    }
+
+  if (steps != -1 || steps != 1)
+    meta_warning ("Multiple steps at the same time not yet implemented, treating as one.\n");
+
+  /*
+   * We don't have the actual scroll source, but only know they should be
+   * considered as discrete steps. The device that produces such scroll events
+   * is the scroll wheel, so pretend that is the scroll source.
+   */
+  direction = discrete_steps_to_scroll_direction (axis, steps);
+  clutter_virtual_input_device_notify_discrete_scroll (session->virtual_pointer,
+                                                       CLUTTER_CURRENT_TIME,
+                                                       direction,
+                                                       CLUTTER_SCROLL_SOURCE_WHEEL);
+
+  meta_dbus_remote_desktop_session_complete_notify_pointer_axis_discrete (skeleton,
+                                                                          invocation);
+
+  return TRUE;
+}
+
+static gboolean
+handle_notify_pointer_motion_absolute (MetaDBusRemoteDesktopSession *skeleton,
+                                       GDBusMethodInvocation        *invocation,
+                                       gdouble                       x,
+                                       gdouble                       y)
+{
+  MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (skeleton);
+
+  clutter_virtual_input_device_notify_absolute_motion (session->virtual_pointer,
+                                                       CLUTTER_CURRENT_TIME,
+                                                       x, y);
+
+  meta_dbus_remote_desktop_session_complete_notify_pointer_motion_absolute (skeleton,
+                                                                            invocation);
+
+  return TRUE;
+}
+
 static void
 meta_remote_desktop_session_init_iface (MetaDBusRemoteDesktopSessionIface *iface)
 {
-  iface->handle_stop = meta_remote_desktop_session_handle_stop;
+  iface->handle_stop = handle_stop;
+  iface->handle_notify_keyboard_keysym = handle_notify_keyboard_keysym;
+  iface->handle_notify_pointer_button = handle_notify_pointer_button;
+  iface->handle_notify_pointer_axis_discrete = handle_notify_pointer_axis_discrete;
+  iface->handle_notify_pointer_motion_absolute = handle_notify_pointer_motion_absolute;
 }
 
 static void

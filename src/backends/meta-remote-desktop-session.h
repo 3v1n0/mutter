@@ -31,9 +31,6 @@
 
 typedef struct _MetaRemoteDesktopSession MetaRemoteDesktopSession;
 
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(MetaDBusRemoteDesktopSessionSkeleton,
-                              g_object_unref);
-
 #define META_TYPE_REMOTE_DESKTOP_SESSION (meta_remote_desktop_session_get_type ())
 G_DECLARE_FINAL_TYPE (MetaRemoteDesktopSession, meta_remote_desktop_session,
                       META, REMOTE_DESKTOP_SESSION,
