@@ -53,4 +53,8 @@ struct gbm_device * meta_cursor_renderer_native_get_gbm_device (MetaCursorRender
 void meta_cursor_renderer_native_get_cursor_size (MetaCursorRendererNative *native, uint64_t *width, uint64_t *height);
 void meta_cursor_renderer_native_force_update (MetaCursorRendererNative *renderer);
 
+void meta_cursor_renderer_native_disable_hw_cursor (MetaCursorRendererNative *renderer);
+
+void meta_cursor_renderer_native_enable_hw_cursor (MetaCursorRendererNative *renderer);
+
 #endif /* META_CURSOR_RENDERER_NATIVE_H */

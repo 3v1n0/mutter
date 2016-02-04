@@ -38,7 +38,10 @@
 #include <meta/meta-backend.h>
 
 #include "meta-dbus-remote-desktop.h"
+#include "backends/meta-backend-private.h"
+#include "backends/meta-cursor-renderer.h"
 #include "backends/meta-remote-desktop-session.h"
+#include "backends/native/meta-cursor-renderer-native.h"
 
 #define META_REMOTE_DESKTOP_DBUS_SERVICE "org.gnome.Mutter.RemoteDesktop"
 #define META_REMOTE_DESKTOP_DBUS_PATH "/org/gnome/Mutter/RemoteDesktop"
@@ -152,11 +155,46 @@ meta_remote_desktop_client_destroy (MetaRemoteDesktopClient *client)
   g_free (client);
 }
 
+#ifdef HAVE_NATIVE_BACKEND
+static unsigned int
+meta_remote_desktop_num_sessions (MetaRemoteDesktop *rd)
+{
+  GHashTableIter iter;
+  MetaRemoteDesktopClient *client;
+  unsigned int count = 0;
+
+  g_hash_table_iter_init (&iter, rd->clients);
+  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &client))
+    {
+      count += g_list_length (client->sessions);
+    }
+
+  return count;
+}
+#endif
+
 static void
 meta_remote_desktop_destroy_client (MetaRemoteDesktop       *rd,
                                     MetaRemoteDesktopClient *client)
 {
   g_hash_table_remove (rd->clients, client->dbus_name);
+
+#ifdef HAVE_NATIVE_BACKEND
+  if (meta_remote_desktop_num_sessions (rd) == 0)
+    {
+      MetaBackend *backend = meta_get_backend ();
+      MetaCursorRenderer *cursor_renderer =
+        meta_backend_get_cursor_renderer (backend);
+
+      if (META_IS_CURSOR_RENDERER_NATIVE (cursor_renderer))
+        {
+          MetaCursorRendererNative *cursor_renderer_native =
+            META_CURSOR_RENDERER_NATIVE (cursor_renderer);
+
+          meta_cursor_renderer_native_enable_hw_cursor (cursor_renderer_native);
+        }
+    }
+#endif
 }
 
 static void
@@ -272,6 +310,23 @@ meta_remote_desktop_handle_start (MetaDBusRemoteDesktop *skeleton,
   meta_dbus_remote_desktop_complete_start (skeleton,
                                            invocation,
                                            session_path);
+
+#ifdef HAVE_NATIVE_BACKEND
+  if (meta_remote_desktop_num_sessions (rd) == 1)
+    {
+      MetaBackend *backend = meta_get_backend ();
+      MetaCursorRenderer *cursor_renderer =
+        meta_backend_get_cursor_renderer (backend);
+
+      if (META_IS_CURSOR_RENDERER_NATIVE (cursor_renderer))
+        {
+          MetaCursorRendererNative *cursor_renderer_native =
+            META_CURSOR_RENDERER_NATIVE (cursor_renderer);
+
+          meta_cursor_renderer_native_disable_hw_cursor (cursor_renderer_native);
+        }
+    }
+#endif
 
   return TRUE;
 }

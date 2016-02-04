@@ -68,6 +68,7 @@ struct _MetaCursorRendererNativePrivate
   gboolean hw_state_invalidated;
   gboolean has_hw_cursor;
   gboolean hw_cursor_broken;
+  gboolean hw_cursor_disabled;
 
   MetaCursorSprite *last_cursor;
   guint animation_timeout_id;
@@ -457,6 +458,9 @@ should_have_hw_cursor (MetaCursorRenderer *renderer,
   CoglTexture *texture;
 
   if (priv->hw_cursor_broken)
+    return FALSE;
+
+  if (priv->hw_cursor_disabled)
     return FALSE;
 
   if (!cursor_sprite)
@@ -868,4 +872,36 @@ void
 meta_cursor_renderer_native_force_update (MetaCursorRendererNative *native)
 {
   force_update_hw_cursor (native);
+}
+
+void
+meta_cursor_renderer_native_disable_hw_cursor (MetaCursorRendererNative *native)
+{
+  MetaCursorRendererNativePrivate *priv =
+    meta_cursor_renderer_native_get_instance_private (native);
+  gboolean force_update = priv->hw_cursor_disabled == FALSE;
+
+  priv->hw_cursor_disabled = TRUE;
+
+  if (force_update)
+    {
+      MetaCursorRenderer *renderer = META_CURSOR_RENDERER (native);
+      meta_cursor_renderer_force_update (renderer);
+    }
+}
+
+void
+meta_cursor_renderer_native_enable_hw_cursor (MetaCursorRendererNative *native)
+{
+  MetaCursorRendererNativePrivate *priv =
+    meta_cursor_renderer_native_get_instance_private (native);
+  gboolean force_update = priv->hw_cursor_disabled == TRUE;
+
+  priv->hw_cursor_disabled = FALSE;
+
+  if (force_update)
+    {
+      MetaCursorRenderer *renderer = META_CURSOR_RENDERER (native);
+      meta_cursor_renderer_force_update (renderer);
+    }
 }
