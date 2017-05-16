@@ -43,6 +43,12 @@ int64_t clutter_stage_get_frame_counter (ClutterStage *stage);
 CLUTTER_AVAILABLE_IN_MUTTER
 void clutter_stage_update_resource_scales (ClutterStage *stage);
 
+CLUTTER_AVAILABLE_IN_MUTTER
+void clutter_stage_capture_into (ClutterStage          *stage,
+                                 gboolean               paint,
+                                 cairo_rectangle_int_t *rect,
+                                 uint8_t               *data);
+
 #undef __CLUTTER_H_INSIDE__
 
 #endif /* __CLUTTER_MUTTER_H__ */
