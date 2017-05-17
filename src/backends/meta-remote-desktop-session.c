@@ -39,8 +39,6 @@
 
 #define META_REMOTE_DESKTOP_SESSION_DBUS_PATH "/org/gnome/Mutter/RemoteDesktop/Session"
 
-#define DEFAULT_FRAMERATE 30
-
 enum
 {
   STOPPED,
@@ -92,8 +90,7 @@ meta_remote_desktop_session_init_stream (MetaRemoteDesktopSession *session)
                                      &(MetaRectangle) {
                                        .width = session->width,
                                        .height = session->height
-                                     },
-                                     DEFAULT_FRAMERATE);
+                                     });
   session->src = src;
   session->stream_id = stream_id;
 

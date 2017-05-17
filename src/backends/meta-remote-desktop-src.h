@@ -39,8 +39,7 @@ G_DECLARE_FINAL_TYPE (MetaRemoteDesktopSrc,
                       GObject);
 
 MetaRemoteDesktopSrc * meta_remote_desktop_src_new (const char    *stream_id,
-                                                    MetaRectangle *rect,
-                                                    int            framerate);
+                                                    MetaRectangle *rect);
 
 void meta_remote_desktop_src_maybe_record_frame (MetaRemoteDesktopSrc *src,
                                                  ClutterStage         *stage);

@@ -84,7 +84,6 @@ struct _MetaRemoteDesktopSrc
 
   char *stream_id;
   MetaRectangle rect;
-  int framerate;
 
   MetaSpaType spa_type;
   uint8_t params_buffer[1024];
@@ -131,7 +130,9 @@ meta_remote_desktop_src_maybe_record_frame (MetaRemoteDesktopSrc *src,
 
   now_us = g_get_monotonic_time ();
   if (src->last_frame_timestamp_us != 0 &&
-      now_us - src->last_frame_timestamp_us < 1000000 / src->framerate)
+      (now_us - src->last_frame_timestamp_us <
+       ((1000000 * src->video_format.max_framerate.denom) /
+        src->video_format.max_framerate.num)))
     return;
 
   if (!src->pinos_stream)
@@ -294,7 +295,13 @@ create_pinos_stream (MetaRemoteDesktopSrc *src,
                           PROP (&prop_frame,
                                 spa_type->format_video.framerate,
                                 SPA_POD_TYPE_FRACTION,
-                                src->framerate, 1));
+                                0, 1),
+                          PROP_U_MM (&prop_frame,
+                                     spa_type->format_video.max_framerate,
+                                     SPA_POD_TYPE_FRACTION,
+                                     60, 1,
+                                     1, 1,
+                                     60, 1));
   format = SPA_POD_BUILDER_DEREF (&pod_builder, format_frame.ref, SpaFormat);
 
   pinos_signal_add (&pinos_stream->state_changed,
@@ -356,13 +363,11 @@ on_state_changed (PinosListener *listener,
 
 MetaRemoteDesktopSrc *
 meta_remote_desktop_src_new (const char    *stream_id,
-                             MetaRectangle *rect,
-                             int            framerate)
+                             MetaRectangle *rect)
 {
   return g_object_new (META_TYPE_REMOTE_DESKTOP_SRC,
                        "stream-id", stream_id,
                        "rect", rect,
-                       "framerate", framerate,
                        NULL);
 }
 
@@ -489,9 +494,6 @@ meta_remote_desktop_src_set_property (GObject      *object,
     case PROP_RECT:
       src->rect = *(MetaRectangle *) g_value_get_boxed (value);
       break;
-    case PROP_FRAMERATE:
-      src->framerate = g_value_get_int (value);
-      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
@@ -512,9 +514,6 @@ meta_remote_desktop_src_get_property (GObject    *object,
       break;
     case PROP_RECT:
       g_value_set_boxed (value, &src->rect);
-      break;
-    case PROP_FRAMERATE:
-      g_value_set_int (value, src->framerate);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -555,13 +554,4 @@ meta_remote_desktop_src_class_init (MetaRemoteDesktopSrcClass *klass)
                                                        G_PARAM_READWRITE |
                                                        G_PARAM_CONSTRUCT_ONLY |
                                                        G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (object_class,
-                                   PROP_FRAMERATE,
-                                   g_param_spec_int ("framerate",
-                                                     "framerate",
-                                                     "video src framerate",
-                                                     0, INT_MAX, 0,
-                                                     G_PARAM_READWRITE |
-                                                     G_PARAM_CONSTRUCT_ONLY |
-                                                     G_PARAM_STATIC_STRINGS));
 }
