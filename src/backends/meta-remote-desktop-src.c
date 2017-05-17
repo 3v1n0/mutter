@@ -89,6 +89,8 @@ struct _MetaRemoteDesktopSrc
   MetaSpaType spa_type;
   uint8_t params_buffer[1024];
   SpaVideoInfoRaw video_format;
+
+  gint64 last_frame_timestamp_us;
 };
 
 G_DEFINE_TYPE (MetaRemoteDesktopSrc,
@@ -125,6 +127,12 @@ meta_remote_desktop_src_maybe_record_frame (MetaRemoteDesktopSrc *src,
   SpaBuffer *buffer;
   uint8_t *map = NULL;
   uint8_t *data;
+  gint64 now_us;
+
+  now_us = g_get_monotonic_time ();
+  if (src->last_frame_timestamp_us != 0 &&
+      now_us - src->last_frame_timestamp_us < 1000000 / src->framerate)
+    return;
 
   if (!src->pinos_stream)
     return;
@@ -158,6 +166,7 @@ meta_remote_desktop_src_maybe_record_frame (MetaRemoteDesktopSrc *src,
     }
 
   record_frame (src, stage, data);
+  src->last_frame_timestamp_us = now_us;
 
   if (map)
     munmap (map, buffer->datas[0].maxsize);
