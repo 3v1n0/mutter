@@ -26,14 +26,13 @@
 
 #include "backends/meta-remote-desktop-session.h"
 
-#include <cogl/cogl.h>
-#include <gst/gst.h>
 #include <linux/input.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "backends/native/meta-backend-native.h"
 #include "backends/x11/meta-backend-x11.h"
 #include "backends/meta-remote-desktop-src.h"
+#include "cogl/cogl.h"
 #include "meta/meta-backend.h"
 #include "meta/errors.h"
 #include "meta-dbus-remote-desktop.h"
@@ -51,20 +50,13 @@ enum
 
 guint signals[LAST_SIGNAL];
 
-typedef struct _MetaRemoteDesktopPipeline
-{
-  MetaRemoteDesktopSession *session;
-  GstElement *pipeline;
-} MetaRemoteDesktopPipeline;
-
 struct _MetaRemoteDesktopSession
 {
   MetaDBusRemoteDesktopSessionSkeleton parent;
 
   MetaRemoteDesktop *rd;
 
-  MetaRemoteDesktopPipeline *pipeline;
-  GstElement *src;
+  MetaRemoteDesktopSrc *src;
   char *stream_id;
 
   char *object_path;
@@ -73,8 +65,6 @@ struct _MetaRemoteDesktopSession
   int width;
   int height;
 
-  GstClockTime last_frame_time;
-
   ClutterVirtualInputDevice *virtual_pointer;
   ClutterVirtualInputDevice *virtual_keyboard;
 };
@@ -82,264 +72,44 @@ struct _MetaRemoteDesktopSession
 static void
 meta_remote_desktop_session_init_iface (MetaDBusRemoteDesktopSessionIface *iface);
 
-static void
-meta_remote_desktop_pipeline_free (MetaRemoteDesktopPipeline *pipeline);
-
-G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaRemoteDesktopPipeline,
-                               meta_remote_desktop_pipeline_free);
-
 G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktopSession,
                          meta_remote_desktop_session,
                          META_DBUS_TYPE_REMOTE_DESKTOP_SESSION_SKELETON,
                          G_IMPLEMENT_INTERFACE (META_DBUS_TYPE_REMOTE_DESKTOP_SESSION,
                                                 meta_remote_desktop_session_init_iface));
 
-static void
-meta_remote_desktop_pipeline_free (MetaRemoteDesktopPipeline *pipeline)
-{
-  gst_object_unref (pipeline->pipeline);
-  g_free (pipeline);
-}
-
-static void
-meta_remote_desktop_session_pipeline_closed (MetaRemoteDesktopPipeline *pipeline)
-{
-  gst_element_set_state (pipeline->pipeline, GST_STATE_NULL);
-
-  if (pipeline->session)
-    pipeline->session->pipeline = NULL;
-
-  meta_remote_desktop_pipeline_free (pipeline);
-}
-
 static gboolean
-meta_remote_desktop_session_pipeline_bus_watch (GstBus     *bus,
-                                                GstMessage *message,
-                                                gpointer    data)
+meta_remote_desktop_session_init_stream (MetaRemoteDesktopSession *session)
 {
-  MetaRemoteDesktopPipeline *pipeline = data;
-  MetaRemoteDesktopSession *session;
-  GError *error = NULL;
-
-  switch (message->type)
-    {
-    case GST_MESSAGE_EOS:
-      g_assert (!pipeline->session);
-
-      meta_remote_desktop_session_pipeline_closed (pipeline);
-
-      return FALSE;
-
-    case GST_MESSAGE_ERROR:
-      gst_message_parse_error (message, &error, NULL);
-      g_warning ("Error in remote desktop video pipeline: %s\n",
-                 error->message);
-      g_error_free (error);
-
-      session = pipeline->session;
-      meta_remote_desktop_session_pipeline_closed (pipeline);
-
-      if (session)
-        meta_remote_desktop_session_stop (session);
-
-      return FALSE;
-
-    default:
-      break;
-    }
-
-  return TRUE;
-}
-
-static gboolean
-meta_remote_desktop_session_add_source (MetaRemoteDesktopSession  *session,
-                                        MetaRemoteDesktopPipeline *pipeline)
-{
-  g_autoptr(GstPad) sink_pad = NULL;
-  g_autoptr(GstPad) src_pad = NULL;
+  char *stream_id;
   MetaRemoteDesktopSrc *src;
-
-  sink_pad = gst_bin_find_unlinked_pad (GST_BIN (pipeline->pipeline),
-                                        GST_PAD_SINK);
-  if (sink_pad == NULL)
-    {
-      meta_warning ("MetaRemoteDesktop: pipeline has no unlinked sink pad\n");
-      return FALSE;
-    }
-
-  src = meta_remote_desktop_src_new (DEFAULT_FRAMERATE,
-                                     session->width,
-                                     session->height);
-  if (src == NULL)
-    {
-      meta_warning ("MetaRemoteDesktop: Can't create source element\n");
-      return FALSE;
-    }
-  gst_bin_add (GST_BIN (pipeline->pipeline), GST_ELEMENT (src));
-
-  src_pad = gst_element_get_static_pad (GST_ELEMENT (src), "src");
-  if (!src_pad)
-    {
-      meta_warning ("MetaRemoteDesktop: can't get src pad link into pipeline\n");
-      return FALSE;
-    }
-
-  if (gst_pad_link (src_pad, sink_pad) != GST_PAD_LINK_OK)
-    {
-      meta_warning ("MetaRemoteDesktop: can't link to sink pad\n");
-      return FALSE;
-    }
-
-  session->src = GST_ELEMENT (src);
-
-  return TRUE;
-}
-
-static gboolean
-meta_remote_desktop_session_open_pipeline (MetaRemoteDesktopSession *session)
-{
-  g_autoptr(MetaRemoteDesktopPipeline) pipeline = NULL;
-  GstBus *bus;
-  GError *error = NULL;
-  g_autofree char *stream_id = NULL;
-  GstStructure *stream_properties;
   static unsigned int global_stream_id = 0;
-  MetaDBusRemoteDesktopSession *dbus_session;
-
-  pipeline = g_new0 (MetaRemoteDesktopPipeline, 1);
-
-  pipeline->session = session;
-  pipeline->pipeline = gst_pipeline_new (NULL);
-  if (!pipeline->pipeline)
-    {
-      meta_warning ("MetaRemoteDesktop: Couldn't start pinos sink: %s\n",
-                    error->message);
-      return FALSE;
-    }
-
-  GstElement *pinossink = gst_element_factory_make ("pinossink", NULL);
-  gst_bin_add (GST_BIN (pipeline->pipeline), pinossink);
 
   stream_id = g_strdup_printf ("%u", ++global_stream_id);
-  stream_properties =
-    gst_structure_new ("mutter/remote-desktop",
-                       "gnome.remote_desktop.stream_id", G_TYPE_STRING, stream_id,
-                       NULL);
-  g_object_set (pinossink, "stream-properties", stream_properties, NULL);
-  gst_structure_free (stream_properties);
-
-  if (!meta_remote_desktop_session_add_source (session, pipeline))
-    {
-      meta_warning ("MetaRemoteDesktop: Couldn't add video source\n");
-      return FALSE;
-    }
-
-  dbus_session = META_DBUS_REMOTE_DESKTOP_SESSION (session);
-  meta_dbus_remote_desktop_session_set_pinos_stream_id (dbus_session,
-                                                        stream_id);
-
-  gst_element_set_state (pipeline->pipeline, GST_STATE_PLAYING);
-  bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline->pipeline));
-  gst_bus_add_watch (bus,
-                     meta_remote_desktop_session_pipeline_bus_watch,
-                     pipeline);
-  gst_object_unref (bus);
-
-  session->pipeline = g_steal_pointer (&pipeline);
-  session->stream_id = g_steal_pointer (&stream_id);
+  src = meta_remote_desktop_src_new (stream_id,
+                                     &(MetaRectangle) {
+                                       .width = session->width,
+                                       .height = session->height
+                                     },
+                                     DEFAULT_FRAMERATE);
+  session->src = src;
+  session->stream_id = stream_id;
 
   return TRUE;
-}
-
-static void
-meta_remote_desktop_session_close_pipeline (MetaRemoteDesktopSession *session)
-{
-  MetaRemoteDesktopPipeline *pipeline = session->pipeline;
-
-  if (pipeline)
-    {
-      pipeline->session = NULL;
-      session->pipeline = NULL;
-
-      gst_element_send_event (pipeline->pipeline, gst_event_new_eos ());
-    }
-}
-
-static void
-meta_remote_desktop_session_record_frame (MetaRemoteDesktopSession *session,
-                                          GstClockTime              now)
-{
-  GstBuffer *buffer;
-  GstMapInfo map_info;
-  size_t size;
-
-  size = session->width * session->height * 4;
-
-  /* TODO: Disable using hw planes if we rely on read_pixels. */
-
-  buffer = meta_remote_desktop_try_create_tmpfile_gst_buffer (session->rd,
-                                                              size);
-  if (!buffer)
-    {
-      uint8_t *data;
-
-      data = g_malloc (size);
-      buffer = gst_buffer_new ();
-      gst_buffer_insert_memory (buffer, -1,
-                                gst_memory_new_wrapped (0, data, size, 0,
-                                                        size, data, g_free));
-    }
-
-  gst_buffer_map (buffer, &map_info, GST_MAP_WRITE);
-
-  cogl_framebuffer_read_pixels (cogl_get_draw_framebuffer (),
-                                0,
-                                0,
-                                session->width,
-                                session->height,
-                                CLUTTER_CAIRO_FORMAT_ARGB32,
-                                map_info.data);
-
-  gst_buffer_unmap (buffer, &map_info);
-
-  meta_remote_desktop_src_add_buffer (META_REMOTE_DESKTOP_SRC (session->src),
-                                      buffer);
-  gst_buffer_unref (buffer);
 }
 
 static void
 meta_remote_desktop_session_on_stage_paint (ClutterActor             *actor,
                                             MetaRemoteDesktopSession *session)
 {
-  GstClock *clock;
-  GstClockTime now;
-  GstClockTime interval_threshold;
-
-  g_return_if_fail (session->pipeline);
-
-  clock = gst_element_get_clock (GST_ELEMENT (session->src));
-  if (!clock)
-    return;
-
-  now = gst_clock_get_time (clock);
-
-  /* Drop frames if the interval since the last frame is less than 75% of
-   * the desired frame interval.
-   */
-  interval_threshold = gst_util_uint64_scale_int (GST_SECOND,
-                                                  3,
-                                                  4 * DEFAULT_FRAMERATE);
-  if (GST_CLOCK_TIME_IS_VALID (session->last_frame_time) &&
-      now - session->last_frame_time < interval_threshold)
-    return;
-
-  meta_remote_desktop_session_record_frame (session, now);
+  meta_remote_desktop_src_maybe_record_frame (session->src,
+                                              CLUTTER_STAGE (session->stage));
 }
 
 gboolean
 meta_remote_desktop_session_start (MetaRemoteDesktopSession *session)
 {
-  if (!meta_remote_desktop_session_open_pipeline (session))
+  if (!meta_remote_desktop_session_init_stream (session))
     return FALSE;
 
   g_signal_connect_after (session->stage, "paint",
@@ -353,7 +123,8 @@ meta_remote_desktop_session_start (MetaRemoteDesktopSession *session)
 void
 meta_remote_desktop_session_stop (MetaRemoteDesktopSession *session)
 {
-  meta_remote_desktop_session_close_pipeline (session);
+  g_clear_object (&session->src);
+  g_clear_pointer (&session->stream_id, g_free);
 
   g_signal_handlers_disconnect_by_func (session->stage,
                                         (gpointer) meta_remote_desktop_session_on_stage_paint,
@@ -365,7 +136,7 @@ meta_remote_desktop_session_stop (MetaRemoteDesktopSession *session)
 gboolean
 meta_remote_desktop_session_is_running (MetaRemoteDesktopSession *session)
 {
-  return session->pipeline != NULL;
+  return !!session->src;
 }
 
 const char *
@@ -593,8 +364,6 @@ meta_remote_desktop_session_init (MetaRemoteDesktopSession *session)
   clutter_actor_get_allocation_box (session->stage, &allocation);
   session->width = (int)(0.5 + allocation.x2 - allocation.x1);
   session->height = (int)(0.5 + allocation.y2 - allocation.y1);
-
-  session->last_frame_time = GST_CLOCK_TIME_NONE;
 }
 
 static void

@@ -28,20 +28,18 @@
 
 #include "backends/meta-remote-desktop.h"
 
+#include <errno.h>
 #include <fcntl.h>
-#include <gst/gst.h>
-#include <gst/allocators/gstfdmemory.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <meta/errors.h>
-#include <meta/meta-backend.h>
 
 #include "meta-dbus-remote-desktop.h"
 #include "backends/meta-backend-private.h"
 #include "backends/meta-cursor-renderer.h"
 #include "backends/meta-remote-desktop-session.h"
 #include "backends/native/meta-cursor-renderer-native.h"
+#include "meta/errors.h"
+#include "meta/meta-backend.h"
 
 #define META_REMOTE_DESKTOP_DBUS_SERVICE "org.gnome.Mutter.RemoteDesktop"
 #define META_REMOTE_DESKTOP_DBUS_PATH "/org/gnome/Mutter/RemoteDesktop"
@@ -53,7 +51,6 @@ struct _MetaRemoteDesktop
   GHashTable *clients;
 
   int dbus_name_id;
-  GstAllocator *fd_allocator;
 };
 
 typedef struct _MetaRemoteDesktopClient
@@ -71,62 +68,6 @@ G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktop,
                          META_DBUS_TYPE_REMOTE_DESKTOP_SKELETON,
                          G_IMPLEMENT_INTERFACE (META_DBUS_TYPE_REMOTE_DESKTOP,
                                                 meta_remote_desktop_init_iface));
-
-static int
-tmpfile_create (size_t size)
-{
-  char filename[] = "/dev/shm/tmpmetaremote.XXXXXX";
-  int fd;
-
-  fd = mkostemp (filename, O_CLOEXEC);
-  if (fd == -1)
-    {
-      meta_warning ("Failed to create temporary file: %s\n", strerror (errno));
-      return -1;
-    }
-  unlink (filename);
-
-  if (ftruncate (fd, size) == -1)
-    {
-      meta_warning ("Failed to truncate temporary file: %s\n",
-                    strerror (errno));
-      close (fd);
-      return -1;
-    }
-
-  return fd;
-}
-
-GstBuffer *
-meta_remote_desktop_try_create_tmpfile_gst_buffer (MetaRemoteDesktop *rd,
-                                                   size_t             size)
-{
-  GstBuffer *buffer;
-  GstMemory *memory;
-  int fd;
-
-  if (!rd->fd_allocator)
-    return NULL;
-
-  fd = tmpfile_create (size);
-  if (fd == -1)
-    return NULL;
-
-  memory = gst_fd_allocator_alloc (rd->fd_allocator,
-                                   fd,
-                                   size,
-                                   GST_FD_MEMORY_FLAG_NONE);
-  if (!memory)
-    {
-      close (fd);
-      return NULL;
-    }
-
-  buffer = gst_buffer_new ();
-  gst_buffer_append_memory (buffer, memory);
-
-  return buffer;
-}
 
 static void
 meta_remote_desktop_client_destroy (MetaRemoteDesktopClient *client)
@@ -384,12 +325,6 @@ initialize_dbus_interface (MetaRemoteDesktop *rd)
 static void
 meta_remote_desktop_init (MetaRemoteDesktop *rd)
 {
-  gst_init (NULL, NULL);
-
-  rd->fd_allocator = gst_fd_allocator_new ();
-  if (!rd->fd_allocator)
-    meta_warning ("Missing fdmemory gstreamer plugin, fallback to malloc\n");
-
   rd->clients =
     g_hash_table_new_full (g_str_hash,
                            g_str_equal,

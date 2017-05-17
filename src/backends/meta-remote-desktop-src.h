@@ -26,8 +26,9 @@
 #define META_REMOTE_DESKTOP_SRC_H
 
 #include <glib-object.h>
-#define GST_USE_UNSTABLE_API
-#include <gst/base/gstpushsrc.h>
+
+#include "clutter/clutter.h"
+#include "mutter/meta/boxes.h"
 
 typedef struct _MetaRemoteDesktopSrc MetaRemoteDesktopSrc;
 
@@ -35,13 +36,13 @@ typedef struct _MetaRemoteDesktopSrc MetaRemoteDesktopSrc;
 G_DECLARE_FINAL_TYPE (MetaRemoteDesktopSrc,
                       meta_remote_desktop_src,
                       META, REMOTE_DESKTOP_SRC,
-                      GstPushSrc);
+                      GObject);
 
-MetaRemoteDesktopSrc * meta_remote_desktop_src_new (int frames_per_second,
-                                                    int width,
-                                                    int height);
+MetaRemoteDesktopSrc * meta_remote_desktop_src_new (const char    *stream_id,
+                                                    MetaRectangle *rect,
+                                                    int            framerate);
 
-void meta_remote_desktop_src_add_buffer (MetaRemoteDesktopSrc *src,
-                                         GstBuffer            *buffer);
+void meta_remote_desktop_src_maybe_record_frame (MetaRemoteDesktopSrc *src,
+                                                 ClutterStage         *stage);
 
 #endif /* META_REMOTE_DESKTOP_SRC_H */
