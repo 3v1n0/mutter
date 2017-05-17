@@ -81,6 +81,8 @@ G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktopSession,
 static gboolean
 meta_remote_desktop_session_init_stream (MetaRemoteDesktopSession *session)
 {
+  MetaDBusRemoteDesktopSession *skeleton =
+    META_DBUS_REMOTE_DESKTOP_SESSION  (session);
   char *stream_id;
   MetaRemoteDesktopSrc *src;
   static unsigned int global_stream_id = 0;
@@ -94,6 +96,8 @@ meta_remote_desktop_session_init_stream (MetaRemoteDesktopSession *session)
                                      DEFAULT_FRAMERATE);
   session->src = src;
   session->stream_id = stream_id;
+
+  meta_dbus_remote_desktop_session_set_pinos_stream_id (skeleton, stream_id);
 
   return TRUE;
 }
@@ -123,8 +127,12 @@ meta_remote_desktop_session_start (MetaRemoteDesktopSession *session)
 void
 meta_remote_desktop_session_stop (MetaRemoteDesktopSession *session)
 {
+  MetaDBusRemoteDesktopSession *skeleton =
+    META_DBUS_REMOTE_DESKTOP_SESSION  (session);
   g_clear_object (&session->src);
   g_clear_pointer (&session->stream_id, g_free);
+
+  meta_dbus_remote_desktop_session_set_pinos_stream_id (skeleton, NULL);
 
   g_signal_handlers_disconnect_by_func (session->stage,
                                         (gpointer) meta_remote_desktop_session_on_stage_paint,
