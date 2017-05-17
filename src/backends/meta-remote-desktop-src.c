@@ -236,7 +236,7 @@ on_stream_format_changed (PinosListener  *listener,
                                 src->video_format.size.width * bpp),
                           PROP_U_MM (&prop_frame, alloc_param_buffers->buffers,
                                      SPA_POD_TYPE_INT,
-                                     2, 2, 2),
+                                     16, 2, 16),
                           PROP (&prop_frame, alloc_param_buffers->align,
                                 SPA_POD_TYPE_INT,
                                 16));
