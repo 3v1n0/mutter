@@ -365,6 +365,8 @@ static void
 meta_remote_desktop_session_init (MetaRemoteDesktopSession *session)
 {
   MetaBackend *backend = meta_get_backend ();
+  ClutterDeviceManager *device_manager =
+    clutter_device_manager_get_default ();
   ClutterActor *stage = meta_backend_get_stage (backend);
   ClutterActorBox allocation;
 
@@ -372,6 +374,13 @@ meta_remote_desktop_session_init (MetaRemoteDesktopSession *session)
   clutter_actor_get_allocation_box (session->stage, &allocation);
   session->width = (int)(0.5 + allocation.x2 - allocation.x1);
   session->height = (int)(0.5 + allocation.y2 - allocation.y1);
+
+  session->virtual_pointer =
+    clutter_device_manager_create_virtual_device (device_manager,
+                                                  CLUTTER_POINTER_DEVICE);
+  session->virtual_keyboard =
+    clutter_device_manager_create_virtual_device (device_manager,
+                                                  CLUTTER_KEYBOARD_DEVICE);
 }
 
 static void
