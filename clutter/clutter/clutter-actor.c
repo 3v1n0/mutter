@@ -17708,7 +17708,7 @@ _clutter_actor_calculate_resource_scale (ClutterActor *self,
   ClutterActor *stage;
   GList *views;
   GList *l;
-  int max_scale = 0;
+  float max_scale = 0;
 
   stage = _clutter_actor_get_stage_internal (self);
   if (!stage)
