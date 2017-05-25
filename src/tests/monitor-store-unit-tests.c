@@ -51,7 +51,7 @@ typedef struct _MonitorTestCaseMonitor
 typedef struct _MonitorTestCaseLogicalMonitor
 {
   MetaRectangle layout;
-  int scale;
+  float scale;
   MetaMonitorTransform transform;
   gboolean is_primary;
   gboolean is_presentation;

@@ -29,6 +29,7 @@
 #include "meta-wayland-private.h"
 #include "backends/meta-logical-monitor.h"
 #include "meta-monitor-manager-private.h"
+#include "core/meta-fraction.h"
 
 #include <string.h>
 
@@ -109,6 +110,38 @@ calculate_suitable_subpixel_order (MetaLogicalMonitor *logical_monitor)
     }
 
   return cogl_subpixel_order_to_wl_output_subpixel (subpixel_order);
+}
+
+static gboolean
+is_valid_output_scale (MetaFraction *fraction)
+{
+  switch (fraction->num)
+    {
+    case 1:
+    case 2:
+    case 3:
+      return TRUE;
+      break;
+    default:
+      g_warning ("Invalid output fraction scale %d/%d",
+                 fraction->num, fraction->denom);
+      return FALSE;
+    }
+}
+
+static int
+calculate_wayland_output_scale (MetaLogicalMonitor *logical_monitor)
+{
+  float scale;
+  MetaFraction fraction;
+
+  scale = meta_logical_monitor_get_scale (logical_monitor);
+  fraction = meta_fraction_from_double (scale);
+
+  if (is_valid_output_scale (&fraction))
+    return fraction.num;
+  else
+    return (int) roundf (scale + 0.25);
 }
 
 static void
@@ -205,7 +238,7 @@ send_output_events (struct wl_resource *resource,
     {
       int scale;
 
-      scale = (int) meta_logical_monitor_get_scale (logical_monitor);
+      scale = calculate_wayland_output_scale (logical_monitor);
       if (need_all_events ||
           old_scale != scale)
         {
@@ -273,7 +306,7 @@ meta_wayland_output_set_logical_monitor (MetaWaylandOutput  *wayland_output,
 
   if (current_mode == preferred_mode)
     wayland_output->mode_flags |= WL_OUTPUT_MODE_PREFERRED;
-  wayland_output->scale = (int) meta_logical_monitor_get_scale (logical_monitor);
+  wayland_output->scale = calculate_wayland_output_scale (logical_monitor);
   wayland_output->refresh_rate = meta_monitor_mode_get_refresh_rate (current_mode);
 }
 

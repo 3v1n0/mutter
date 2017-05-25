@@ -630,6 +630,7 @@ handle_end_element (GMarkupParseContext  *context,
 
             if (!meta_verify_logical_monitor_config (logical_monitor_config,
                                                      layout_mode,
+                                                     store->monitor_manager,
                                                      error))
               return;
           }
