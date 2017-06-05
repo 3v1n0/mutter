@@ -176,10 +176,6 @@ static void
 surface_actor_mapped_notify (MetaSurfaceActorWayland *surface_actor,
                              GParamSpec              *pspec,
                              MetaWaylandSurface      *surface);
-static void
-surface_actor_allocation_notify (MetaSurfaceActorWayland *surface_actor,
-                                 GParamSpec              *pspec,
-                                 MetaWaylandSurface      *surface);
 
 static void
 unset_param_value (GParameter *param)
@@ -422,9 +418,6 @@ meta_wayland_surface_destroy_window (MetaWaylandSurface *surface)
 
       g_signal_handlers_disconnect_by_func (surface->surface_actor,
                                             surface_actor_mapped_notify,
-                                            surface);
-      g_signal_handlers_disconnect_by_func (surface->surface_actor,
-                                            surface_actor_allocation_notify,
                                             surface);
 
       meta_window_unmanage (surface->window, timestamp);
@@ -1340,17 +1333,16 @@ wl_surface_destructor (struct wl_resource *resource)
 }
 
 static void
-surface_actor_mapped_notify (MetaSurfaceActorWayland *surface_actor,
-                             GParamSpec              *pspec,
-                             MetaWaylandSurface      *surface)
+surface_actor_painting (MetaSurfaceActorWayland *surface_actor,
+                        MetaWaylandSurface      *surface)
 {
   meta_wayland_surface_update_outputs (surface);
 }
 
 static void
-surface_actor_allocation_notify (MetaSurfaceActorWayland *surface_actor,
-                                 GParamSpec              *pspec,
-                                 MetaWaylandSurface      *surface)
+surface_actor_mapped_notify (MetaSurfaceActorWayland *surface_actor,
+                             GParamSpec              *pspec,
+                             MetaWaylandSurface      *surface)
 {
   meta_wayland_surface_update_outputs (surface);
 }
@@ -1374,9 +1366,10 @@ meta_wayland_surface_create (MetaWaylandCompositor *compositor,
   wl_list_init (&surface->pending_frame_callback_list);
 
   g_signal_connect_object (surface->surface_actor,
-                           "notify::allocation",
-                           G_CALLBACK (surface_actor_allocation_notify),
-                           surface, 0);
+                           "painting",
+                           G_CALLBACK (surface_actor_painting),
+                           surface,
+                           0);
   g_signal_connect_object (surface->surface_actor,
                            "notify::mapped",
                            G_CALLBACK (surface_actor_mapped_notify),
