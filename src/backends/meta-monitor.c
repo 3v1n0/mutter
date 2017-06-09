@@ -31,6 +31,7 @@
 #include "backends/meta-output.h"
 
 #define SCALE_FACTORS_PER_INTEGER 4
+#define SCALE_FACTORS_SETPS (1.0 / (float) SCALE_FACTORS_PER_INTEGER)
 #define MINIMUM_SCALE_FACTOR 1.0f
 #define MAXIMUM_SCALE_FACTOR 4.0f
 #define MINIMUM_LOGICAL_WIDTH 800
@@ -1480,8 +1481,7 @@ meta_monitor_calculate_mode_scale (MetaMonitor     *monitor,
 static float
 get_closest_scale_factor_for_resolution (float width,
                                          float height,
-                                         float scale,
-                                         float scale_step)
+                                         float scale)
 {
   unsigned int i, j;
   float scaled_h;
@@ -1509,35 +1509,31 @@ get_closest_scale_factor_for_resolution (float width,
   limit_exceeded = FALSE;
   base_scaled_w = floorf (scaled_w);
 
-  do
-    {
+  do {
+      for (j = 0; j < 2; ++j)
+      {
+        gfloat current_scale;
+        int offset = i * (j ? 1 : -1);
+        scaled_w = base_scaled_w + offset;
+        current_scale = width / scaled_w;
+        scaled_h = height / current_scale;
 
-      for (j = 0; j < 2; j++)
-        {
-          float current_scale;
-          int offset = i * (j ? 1 : -1);
+        if (current_scale >= scale + SCALE_FACTORS_SETPS ||
+            current_scale <= scale - SCALE_FACTORS_SETPS ||
+            current_scale < MINIMUM_SCALE_FACTOR ||
+            current_scale > MAXIMUM_SCALE_FACTOR)
+          {
+            goto out;
+          }
 
-          scaled_w = base_scaled_w + offset;
-          current_scale = width / scaled_w;
-          scaled_h = height / current_scale;
+        if (floorf (scaled_h) == scaled_h)
+          {
+            found_one = TRUE;
 
-          if (current_scale >= scale + scale_step ||
-              current_scale <= scale - scale_step ||
-              current_scale < MINIMUM_SCALE_FACTOR ||
-              current_scale > MAXIMUM_SCALE_FACTOR)
-            {
-              limit_exceeded = TRUE;
-              continue;
-            }
-
-          if (floorf (scaled_h) == scaled_h)
-            {
-              found_one = TRUE;
-
-              if (fabsf (current_scale - scale) < fabsf (best_scale - scale))
-                best_scale = current_scale;
-            }
-        }
+            if (fabsf (current_scale - scale) < fabsf (best_scale - scale))
+              best_scale = current_scale;
+          }
+      }
 
       i++;
     }
@@ -1555,10 +1551,8 @@ meta_monitor_calculate_supported_scales (MetaMonitor                *monitor,
 {
   unsigned int i, j;
   int width, height;
-  float scale_steps;
   GArray *supported_scales;
 
-  scale_steps = 1.0 / (float) SCALE_FACTORS_PER_INTEGER;
   supported_scales = g_array_new (FALSE, FALSE, sizeof (float));
 
   meta_monitor_mode_get_resolution (monitor_mode, &width, &height);
@@ -1570,7 +1564,7 @@ meta_monitor_calculate_supported_scales (MetaMonitor                *monitor,
       for (j = 0; j < SCALE_FACTORS_PER_INTEGER; j++)
         {
           float scale;
-          float scale_value = i + j * scale_steps;
+          float scale_value = i + j * SCALE_FACTORS_SETPS;
 
           if ((constraints & META_MONITOR_SCALES_CONSTRAINT_NO_FRAC) &&
               fmodf (scale_value, 1.0) != 0.0)
@@ -1580,8 +1574,7 @@ meta_monitor_calculate_supported_scales (MetaMonitor                *monitor,
 
           scale = get_closest_scale_factor_for_resolution (width,
                                                            height,
-                                                           scale_value,
-                                                           scale_steps);
+                                                           scale_value);
 
           if (scale > 0.0f)
             g_array_append_val (supported_scales, scale);
