@@ -236,6 +236,7 @@ struct _MetaMonitorManagerClass
                                     MetaMonitorTransform);
 
   float (*calculate_monitor_mode_scale) (MetaMonitorManager *,
+                                         MetaLogicalMonitorLayoutMode,
                                          MetaMonitor        *,
                                          MetaMonitorMode    *);
 
@@ -342,6 +343,7 @@ void               meta_monitor_manager_lid_is_closed_changed (MetaMonitorManage
 gboolean           meta_monitor_manager_is_headless (MetaMonitorManager *manager);
 
 float              meta_monitor_manager_calculate_monitor_mode_scale (MetaMonitorManager *manager,
+                                                                      MetaLogicalMonitorLayoutMode layout_mode,
                                                                       MetaMonitor        *monitor,
                                                                       MetaMonitorMode    *monitor_mode);
 
