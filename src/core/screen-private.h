@@ -52,7 +52,8 @@ struct _MetaScreen
   Window xroot;
   int default_depth;
   Visual *default_xvisual;
-  MetaRectangle rect;  /* Size of screen; rect.x & rect.y are always 0 */
+  MetaRectangle rect;  /* Logical size of screen; rect.x & rect.y are always 0 */
+  MetaRectangle pixel_rect;  /* Pixel size of screen; x and y as above */
   MetaUI *ui;
 
   guint tile_preview_timeout_id;

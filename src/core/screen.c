@@ -707,14 +707,19 @@ meta_screen_new (MetaDisplay *display,
   screen->screen_name = get_screen_name (display, number);
   screen->xroot = xroot;
   screen->rect.x = screen->rect.y = 0;
+  screen->pixel_rect.x = screen->pixel_rect.y = 0;
 
   manager = meta_monitor_manager_get ();
   g_signal_connect (manager, "monitors-changed",
                     G_CALLBACK (on_monitors_changed), screen);
 
+  meta_monitor_manager_get_screen_logical_size (manager,
+                                                &screen->rect.width,
+                                                &screen->rect.height);
   meta_monitor_manager_get_screen_size (manager,
-                                        &screen->rect.width,
-                                        &screen->rect.height);
+                                        &screen->pixel_rect.width,
+                                        &screen->pixel_rect.height);
+
   xscreen = ScreenOfDisplay (xdisplay, number);
   screen->current_cursor = -1; /* invalid/unset */
   screen->default_xvisual = DefaultVisualOfScreen (xscreen);
@@ -2294,9 +2299,12 @@ on_monitors_changed (MetaMonitorManager *manager,
   MetaBackend *backend;
   MetaCursorRenderer *cursor_renderer;
 
+  meta_monitor_manager_get_screen_logical_size (manager,
+                                                &screen->rect.width,
+                                                &screen->rect.height);
   meta_monitor_manager_get_screen_size (manager,
-                                        &screen->rect.width,
-                                        &screen->rect.height);
+                                        &screen->pixel_rect.width,
+                                        &screen->pixel_rect.height);
 
   reload_logical_monitors (screen);
   set_desktop_geometry_hint (screen);
@@ -2607,10 +2615,10 @@ meta_screen_get_xroot (MetaScreen *screen)
 /**
  * meta_screen_get_size:
  * @screen: A #MetaScreen
- * @width: (out): The width of the screen
- * @height: (out): The height of the screen
+ * @width: (out): The width of the screen (in logical pixels)
+ * @height: (out): The height of the screen (in logical pixels)
  *
- * Retrieve the size of the screen.
+ * Retrieve the logical size of the screen.
  */
 void
 meta_screen_get_size (MetaScreen *screen,
@@ -2622,6 +2630,26 @@ meta_screen_get_size (MetaScreen *screen,
 
   if (height != NULL)
     *height = screen->rect.height;
+}
+
+/**
+ * meta_screen_get_pixel_size:
+ * @screen: A #MetaScreen
+ * @width: (out): The width of the screen (in physical pixels)
+ * @height: (out): The height of the screen (in physical pixels)
+ *
+ * Retrieve the size of the screen.
+ */
+void
+meta_screen_get_pixel_size (MetaScreen *screen,
+                            int        *width,
+                            int        *height)
+{
+  if (width != NULL)
+    *width = screen->pixel_rect.width;
+
+  if (height != NULL)
+    *height = screen->pixel_rect.height;
 }
 
 void

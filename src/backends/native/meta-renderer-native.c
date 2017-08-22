@@ -1636,9 +1636,9 @@ meta_renderer_native_create_legacy_view (MetaRendererNative *renderer_native)
   if (!monitor_manager)
     return NULL;
 
-  meta_monitor_manager_get_screen_size (monitor_manager,
-                                        &view_layout.width,
-                                        &view_layout.height);
+  meta_monitor_manager_get_screen_logical_size (monitor_manager,
+                                                &view_layout.width,
+                                                &view_layout.height);
 
   onscreen = meta_renderer_native_create_onscreen (renderer_native,
                                                    cogl_context,

@@ -1403,6 +1403,8 @@ update_screen_size (MetaMonitorManager *manager,
   GList *l;
   int screen_width = 0;
   int screen_height = 0;
+  int logical_screen_width = 0;
+  int logical_screen_height = 0;
 
   for (l = config->logical_monitor_configs; l; l = l->next)
     {
@@ -1413,16 +1415,26 @@ update_screen_size (MetaMonitorManager *manager,
       right_edge = (logical_monitor_config->layout.width +
                     logical_monitor_config->layout.x);
       if (right_edge > screen_width)
-        screen_width = right_edge;
+        {
+          logical_screen_width = right_edge;
+          screen_width = ceilf (logical_screen_width *
+                                logical_monitor_config->scale);
+        }
 
       bottom_edge = (logical_monitor_config->layout.height +
                      logical_monitor_config->layout.y);
       if (bottom_edge > screen_height)
-        screen_height = bottom_edge;
+        {
+          logical_screen_height = bottom_edge;
+          screen_height = ceilf (logical_screen_height *
+                                 logical_monitor_config->scale);
+        }
     }
 
   manager->screen_width = screen_width;
   manager->screen_height = screen_height;
+  manager->logical_screen_width = logical_screen_width;
+  manager->logical_screen_height = logical_screen_height;
 }
 
 static gboolean

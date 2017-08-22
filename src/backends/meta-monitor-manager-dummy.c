@@ -555,8 +555,8 @@ legacy_calculate_screen_size (MetaMonitorManager *manager)
       height = MAX (height, crtc->rect.y + crtc->rect.height);
     }
 
-  manager->screen_width = width;
-  manager->screen_height = height;
+  manager->screen_width = manager->logical_screen_width = width;
+  manager->screen_height = manager->logical_screen_height = height;
 }
 
 static void

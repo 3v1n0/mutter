@@ -321,6 +321,8 @@ struct _MetaMonitorManager
 
   int screen_width;
   int screen_height;
+  int logical_screen_width;
+  int logical_screen_height;
 
   /* Outputs refer to physical screens,
      CRTCs refer to stuff that can drive outputs
@@ -484,6 +486,9 @@ void                meta_monitor_manager_get_resources     (MetaMonitorManager  
 void                meta_monitor_manager_get_screen_size   (MetaMonitorManager *manager,
                                                             int                *width,
                                                             int                *height);
+void                meta_monitor_manager_get_screen_logical_size (MetaMonitorManager *manager,
+                                                                  int                *width,
+                                                                  int                *height);
 
 void                meta_monitor_manager_apply_configuration (MetaMonitorManager  *manager,
                                                               MetaCrtcInfo       **crtcs,

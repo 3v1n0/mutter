@@ -43,6 +43,9 @@ Window meta_screen_get_xroot (MetaScreen *screen);
 void meta_screen_get_size (MetaScreen *screen,
                            int        *width,
                            int        *height);
+void meta_screen_get_pixel_size (MetaScreen *screen,
+                                 int        *width,
+                                 int        *height);
 
 void meta_screen_set_cm_selection (MetaScreen *screen);
 

@@ -135,7 +135,8 @@ meta_backend_sync_screen_size (MetaBackend *backend)
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
   int width, height;
 
-  meta_monitor_manager_get_screen_size (priv->monitor_manager, &width, &height);
+  meta_monitor_manager_get_screen_logical_size (priv->monitor_manager,
+                                                &width, &height);
 
   META_BACKEND_GET_CLASS (backend)->update_screen_size (backend, width, height);
 }

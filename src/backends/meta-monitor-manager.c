@@ -2785,6 +2785,15 @@ meta_monitor_manager_get_screen_size (MetaMonitorManager *manager,
   *height = manager->screen_height;
 }
 
+void
+meta_monitor_manager_get_screen_logical_size (MetaMonitorManager *manager,
+                                              int                *width,
+                                              int                *height)
+{
+  *width = manager->logical_screen_width;
+  *height = manager->logical_screen_height;
+}
+
 static void
 rebuild_monitors (MetaMonitorManager *manager)
 {
@@ -3114,10 +3123,10 @@ calculate_viewport_matrix (MetaMonitorManager *manager,
 {
   gfloat x, y, width, height;
 
-  x = (float) logical_monitor->rect.x / manager->screen_width;
-  y = (float) logical_monitor->rect.y / manager->screen_height;
-  width  = (float) logical_monitor->rect.width / manager->screen_width;
-  height = (float) logical_monitor->rect.height / manager->screen_height;
+  x = (float) logical_monitor->rect.x / manager->logical_screen_width;
+  y = (float) logical_monitor->rect.y / manager->logical_screen_height;
+  width  = (float) logical_monitor->rect.width / manager->logical_screen_width;
+  height = (float) logical_monitor->rect.height / manager->logical_screen_height;
 
   viewport[0] = width;
   viewport[1] = 0.0f;

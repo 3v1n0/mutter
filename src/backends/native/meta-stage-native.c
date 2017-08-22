@@ -203,7 +203,8 @@ meta_stage_native_get_geometry (ClutterStageWindow    *stage_window,
     {
       int width, height;
 
-      meta_monitor_manager_get_screen_size (monitor_manager, &width, &height);
+      meta_monitor_manager_get_screen_logical_size (monitor_manager,
+                                                    &width, &height);
       *geometry = (cairo_rectangle_int_t) {
         .width = width,
         .height = height,

@@ -662,8 +662,8 @@ meta_input_settings_x11_set_tablet_keep_aspect (MetaInputSettings  *settings,
 
           backend = meta_get_backend ();
           monitor_manager = meta_backend_get_monitor_manager (backend);
-          meta_monitor_manager_get_screen_size (monitor_manager,
-                                                &width, &height);
+          meta_monitor_manager_get_screen_logical_size (monitor_manager,
+                                                        &width, &height);
         }
 
       aspect_ratio = (double) width / height;

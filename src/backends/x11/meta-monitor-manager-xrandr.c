@@ -782,8 +782,8 @@ meta_monitor_manager_xrandr_read_current (MetaMonitorManager *manager)
   screen = ScreenOfDisplay (manager_xrandr->xdisplay,
 			    DefaultScreen (manager_xrandr->xdisplay));
   /* This is updated because we called RRUpdateConfiguration below */
-  manager->screen_width = WidthOfScreen (screen);
-  manager->screen_height = HeightOfScreen (screen);
+  manager->screen_width = manager->logical_screen_width = WidthOfScreen (screen);
+  manager->screen_height = manager->logical_screen_height = HeightOfScreen (screen);
 
   resources = XRRGetScreenResourcesCurrent (manager_xrandr->xdisplay,
 					    DefaultRootWindow (manager_xrandr->xdisplay));
