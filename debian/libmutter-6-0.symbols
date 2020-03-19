@@ -2531,6 +2531,7 @@ libmutter-cogl-6.so.0 libmutter-6-0 #MINVER#
  cogl_pipeline_set_layer_combine_constant@Base 3.29.4
  cogl_pipeline_set_layer_filters@Base 3.29.4
  cogl_pipeline_set_layer_matrix@Base 3.29.4
+ cogl_pipeline_set_layer_max_mipmap_level@Base 3.36.0-2ubuntu1
  cogl_pipeline_set_layer_null_texture@Base 3.29.4
  cogl_pipeline_set_layer_point_sprite_coords_enabled@Base 3.29.4
  cogl_pipeline_set_layer_texture@Base 3.29.4

@@ -1,0 +1,299 @@
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Tue, 11 Feb 2020 17:08:12 +0800
+Subject: background: Limit mipmap levels to avoid loss of visible detail
+
+When the wallpaper image is larger than the monitor resolution we already
+use mipmapping to scale it down smoothly in hardware. We use
+`GL_TEXTURE_MIN_FILTER` = `GL_LINEAR_MIPMAP_LINEAR` for the highest quality
+scaling that GL can do. However that option is designed for 3D use cases
+where the mipmap level is changing over time or space.
+
+Since our wallpaper is not changing distance from us we can improve the
+rendering quality even more than `GL_LINEAR_MIPMAP_LINEAR`. To do this we
+now set `GL_TEXTURE_MAX_LEVEL` (if available) to limit the mipmap level or
+blurriness level to the lowest resolution (highest level) that is still
+equal to or higher than the monitor itself. This way we get the benefits
+of mipmapping (downscaling in hardware) *and* retain the maximum possible
+sharpness for the monitor resolution -- something that
+`GL_LINEAR_MIPMAP_LINEAR` alone doesn't do.
+
+Example:
+
+  Monitor is 1920x1080
+  Wallpaper photo is 4000x3000
+  Mipmaps stored on the GPU are 4000x3000, 2000x1500, 1000x750, ...
+
+  Before: You would see the average of the 2000x1500 and 1000x750 images.
+  After: You will now only see the 2000x1500 image smoothly scaled down.
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/merge_requests/1003
+---
+ cogl/cogl/cogl-pipeline-layer-state.c         | 11 +++++++++
+ cogl/cogl/cogl-pipeline-layer-state.h         |  5 ++++
+ cogl/cogl/cogl-texture-private.h              |  7 +++++-
+ cogl/cogl/cogl-texture.c                      | 11 ++++++++-
+ cogl/cogl/driver/gl/cogl-texture-2d-gl.c      |  4 ++--
+ cogl/cogl/driver/gl/cogl-texture-gl-private.h |  8 +++++--
+ cogl/cogl/driver/gl/cogl-texture-gl.c         | 34 ++++++++++++++++++++++-----
+ src/compositor/meta-background.c              | 29 +++++++++++++++++++++++
+ 8 files changed, 97 insertions(+), 12 deletions(-)
+
+diff --git a/cogl/cogl/cogl-pipeline-layer-state.c b/cogl/cogl/cogl-pipeline-layer-state.c
+index 4ab293c..a5942d1 100644
+--- a/cogl/cogl/cogl-pipeline-layer-state.c
++++ b/cogl/cogl/cogl-pipeline-layer-state.c
+@@ -1361,6 +1361,17 @@ cogl_pipeline_set_layer_filters (CoglPipeline      *pipeline,
+                                           sampler_state);
+ }
+ 
++void
++cogl_pipeline_set_layer_max_mipmap_level (CoglPipeline *pipeline,
++                                          int           layer,
++                                          int           max_level)
++{
++  CoglTexture *texture = cogl_pipeline_get_layer_texture (pipeline, layer);
++
++  if (texture != NULL)
++    _cogl_texture_set_max_level (texture, max_level);
++}
++
+ const CoglSamplerCacheEntry *
+ _cogl_pipeline_layer_get_sampler_state (CoglPipelineLayer *layer)
+ {
+diff --git a/cogl/cogl/cogl-pipeline-layer-state.h b/cogl/cogl/cogl-pipeline-layer-state.h
+index 79ad7bb..1273a68 100644
+--- a/cogl/cogl/cogl-pipeline-layer-state.h
++++ b/cogl/cogl/cogl-pipeline-layer-state.h
+@@ -568,6 +568,11 @@ cogl_pipeline_add_layer_snippet (CoglPipeline *pipeline,
+                                  int layer,
+                                  CoglSnippet *snippet);
+ 
++void
++cogl_pipeline_set_layer_max_mipmap_level (CoglPipeline *pipeline,
++                                          int           layer,
++                                          int           max_level);
++
+ G_END_DECLS
+ 
+ #endif /* __COGL_PIPELINE_LAYER_STATE_H__ */
+diff --git a/cogl/cogl/cogl-texture-private.h b/cogl/cogl/cogl-texture-private.h
+index e65cf1c..aad5f74 100644
+--- a/cogl/cogl/cogl-texture-private.h
++++ b/cogl/cogl/cogl-texture-private.h
+@@ -204,7 +204,8 @@ struct _CoglTexture
+   CoglContext *context;
+   CoglTextureLoader *loader;
+   GList *framebuffers;
+-  int max_level;
++  int max_level;     /* What's actually been set to GL_TEXTURE_MAX_LEVEL */
++  int max_max_level; /* What the user wants it to be limited to */
+   int width;
+   int height;
+   gboolean allocated;
+@@ -377,6 +378,10 @@ _cogl_texture_needs_premult_conversion (CoglPixelFormat src_format,
+ int
+ _cogl_texture_get_n_levels (CoglTexture *texture);
+ 
++void
++_cogl_texture_set_max_level (CoglTexture *texture,
++                             int          max_level);
++
+ void
+ _cogl_texture_get_level_size (CoglTexture *texture,
+                               int level,
+diff --git a/cogl/cogl/cogl-texture.c b/cogl/cogl/cogl-texture.c
+index 587088c..a9ed116 100644
+--- a/cogl/cogl/cogl-texture.c
++++ b/cogl/cogl/cogl-texture.c
+@@ -116,6 +116,7 @@ _cogl_texture_init (CoglTexture *texture,
+ {
+   texture->context = context;
+   texture->max_level = 0;
++  texture->max_max_level = 1000; /* OpenGL default GL_TEXTURE_MAX_LEVEL */
+   texture->width = width;
+   texture->height = height;
+   texture->allocated = FALSE;
+@@ -229,8 +230,16 @@ _cogl_texture_get_n_levels (CoglTexture *texture)
+   int width = cogl_texture_get_width (texture);
+   int height = cogl_texture_get_height (texture);
+   int max_dimension = MAX (width, height);
++  int n_levels = _cogl_util_fls (max_dimension);
+ 
+-  return _cogl_util_fls (max_dimension);
++  return MIN (n_levels, texture->max_max_level + 1);
++}
++
++void
++_cogl_texture_set_max_level (CoglTexture *texture,
++                             int          max_level)
++{
++  texture->max_max_level = max_level;
+ }
+ 
+ void
+diff --git a/cogl/cogl/driver/gl/cogl-texture-2d-gl.c b/cogl/cogl/driver/gl/cogl-texture-2d-gl.c
+index cee284c..4bd94bc 100644
+--- a/cogl/cogl/driver/gl/cogl-texture-2d-gl.c
++++ b/cogl/cogl/driver/gl/cogl-texture-2d-gl.c
+@@ -567,6 +567,8 @@ _cogl_texture_2d_gl_copy_from_bitmap (CoglTexture2D *tex_2d,
+                                           &gl_format,
+                                           &gl_type);
+ 
++  _cogl_texture_gl_ensure_max_level_at_least (tex, level);
++
+   status = ctx->texture_driver->upload_subregion_to_gl (ctx,
+                                                         tex,
+                                                         src_x, src_y,
+@@ -580,8 +582,6 @@ _cogl_texture_2d_gl_copy_from_bitmap (CoglTexture2D *tex_2d,
+ 
+   cogl_object_unref (upload_bmp);
+ 
+-  _cogl_texture_gl_maybe_update_max_level (tex, level);
+-
+   return status;
+ }
+ 
+diff --git a/cogl/cogl/driver/gl/cogl-texture-gl-private.h b/cogl/cogl/driver/gl/cogl-texture-gl-private.h
+index 70e7999..3cb1830 100644
+--- a/cogl/cogl/driver/gl/cogl-texture-gl-private.h
++++ b/cogl/cogl/driver/gl/cogl-texture-gl-private.h
+@@ -53,8 +53,12 @@ _cogl_texture_gl_flush_legacy_texobj_filters (CoglTexture *texture,
+                                               unsigned int mag_filter);
+ 
+ void
+-_cogl_texture_gl_maybe_update_max_level (CoglTexture *texture,
+-                                         int max_level);
++_cogl_texture_gl_ensure_max_level_at_least (CoglTexture *texture,
++                                            int max_level);
++
++void
++_cogl_texture_gl_ensure_max_level_equals (CoglTexture *texture,
++                                          int max_level);
+ 
+ void
+ _cogl_texture_gl_generate_mipmaps (CoglTexture *texture);
+diff --git a/cogl/cogl/driver/gl/cogl-texture-gl.c b/cogl/cogl/driver/gl/cogl-texture-gl.c
+index 5fc8f24..53c3b1a 100644
+--- a/cogl/cogl/driver/gl/cogl-texture-gl.c
++++ b/cogl/cogl/driver/gl/cogl-texture-gl.c
+@@ -98,11 +98,9 @@ _cogl_texture_gl_flush_legacy_texobj_filters (CoglTexture *texture,
+ }
+ 
+ void
+-_cogl_texture_gl_maybe_update_max_level (CoglTexture *texture,
+-                                         int max_level)
++_cogl_texture_gl_ensure_max_level_at_least (CoglTexture *texture,
++                                            int max_level)
+ {
+-  /* This isn't supported on GLES */
+-#ifdef HAVE_COGL_GL
+   CoglContext *ctx = texture->context;
+ 
+   if (_cogl_has_private_feature (ctx, COGL_PRIVATE_FEATURE_TEXTURE_MAX_LEVEL) &&
+@@ -122,7 +120,31 @@ _cogl_texture_gl_maybe_update_max_level (CoglTexture *texture,
+       GE( ctx, glTexParameteri (gl_target,
+                                 GL_TEXTURE_MAX_LEVEL, texture->max_level));
+     }
+-#endif /* HAVE_COGL_GL */
++}
++
++void
++_cogl_texture_gl_ensure_max_level_equals (CoglTexture *texture,
++                                          int max_level)
++{
++  CoglContext *ctx = texture->context;
++
++  if (_cogl_has_private_feature (ctx, COGL_PRIVATE_FEATURE_TEXTURE_MAX_LEVEL) &&
++      texture->max_level != max_level)
++    {
++      CoglContext *ctx = texture->context;
++      GLuint gl_handle;
++      GLenum gl_target;
++
++      cogl_texture_get_gl_texture (texture, &gl_handle, &gl_target);
++
++      texture->max_level = max_level;
++
++      _cogl_bind_gl_texture_transient (gl_target,
++                                       gl_handle);
++
++      GE( ctx, glTexParameteri (gl_target,
++                                GL_TEXTURE_MAX_LEVEL, texture->max_level));
++    }
+ }
+ 
+ void
+@@ -133,7 +155,7 @@ _cogl_texture_gl_generate_mipmaps (CoglTexture *texture)
+   GLuint gl_handle;
+   GLenum gl_target;
+ 
+-  _cogl_texture_gl_maybe_update_max_level (texture, n_levels - 1);
++  _cogl_texture_gl_ensure_max_level_equals (texture, n_levels - 1);
+ 
+   cogl_texture_get_gl_texture (texture, &gl_handle, &gl_target);
+ 
+diff --git a/src/compositor/meta-background.c b/src/compositor/meta-background.c
+index 30be332..e2378a4 100644
+--- a/src/compositor/meta-background.c
++++ b/src/compositor/meta-background.c
+@@ -747,6 +747,25 @@ get_wrap_mode (GDesktopBackgroundStyle style)
+     }
+ }
+ 
++static int
++get_best_mipmap_level (CoglTexture *texture,
++                       int          visible_width,
++                       int          visible_height)
++{
++  int mipmap_width = cogl_texture_get_width (texture);
++  int mipmap_height = cogl_texture_get_height (texture);
++  int halves = 0;
++
++  while (mipmap_width >= visible_width && mipmap_height >= visible_height)
++    {
++      halves++;
++      mipmap_width /= 2;
++      mipmap_height /= 2;
++    }
++
++  return MAX (0, halves - 1);
++}
++
+ CoglTexture *
+ meta_background_get_texture (MetaBackground         *self,
+                              int                     monitor_index,
+@@ -854,10 +873,15 @@ meta_background_get_texture (MetaBackground         *self,
+       if (texture2 != NULL && self->blend_factor != 0.0)
+         {
+           CoglPipeline *pipeline = create_pipeline (PIPELINE_REPLACE);
++          int mipmap_level = get_best_mipmap_level (texture2,
++                                                    texture_width,
++                                                    texture_height);
++
+           cogl_pipeline_set_color4f (pipeline,
+                                       self->blend_factor, self->blend_factor, self->blend_factor, self->blend_factor);
+           cogl_pipeline_set_layer_texture (pipeline, 0, texture2);
+           cogl_pipeline_set_layer_wrap_mode (pipeline, 0, get_wrap_mode (self->style));
++          cogl_pipeline_set_layer_max_mipmap_level (pipeline, 0, mipmap_level);
+ 
+           bare_region_visible = draw_texture (self,
+                                               monitor->fbo, pipeline,
+@@ -876,6 +900,10 @@ meta_background_get_texture (MetaBackground         *self,
+       if (texture1 != NULL && self->blend_factor != 1.0)
+         {
+           CoglPipeline *pipeline = create_pipeline (PIPELINE_ADD);
++          int mipmap_level = get_best_mipmap_level (texture1,
++                                                    texture_width,
++                                                    texture_height);
++
+           cogl_pipeline_set_color4f (pipeline,
+                                      (1 - self->blend_factor),
+                                      (1 - self->blend_factor),
+@@ -883,6 +911,7 @@ meta_background_get_texture (MetaBackground         *self,
+                                      (1 - self->blend_factor));;
+           cogl_pipeline_set_layer_texture (pipeline, 0, texture1);
+           cogl_pipeline_set_layer_wrap_mode (pipeline, 0, get_wrap_mode (self->style));
++          cogl_pipeline_set_layer_max_mipmap_level (pipeline, 0, mipmap_level);
+ 
+           bare_region_visible = bare_region_visible || draw_texture (self,
+                                                                      monitor->fbo, pipeline,
